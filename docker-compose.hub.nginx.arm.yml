@@ -42,7 +42,7 @@ services:
 
   # Redis缓存
   redis:
-    image: redis:7-alpine
+    image: redis:8.8.0-trixie
     platform: linux/arm64  # 显式指定 ARM64 平台
     container_name: tradingagents-redis
     restart: unless-stopped
@@ -165,7 +165,7 @@ services:
 
   # Nginx 反向代理
   nginx:
-    image: nginx:alpine
+    image: nginx:stable-alpine3.24
     platform: linux/arm64  # 显式指定 ARM64 平台
     container_name: tradingagents-nginx
     restart: unless-stopped

@@ -2,8 +2,9 @@
 # 前后端分离架构 - 后端服务
 # 支持多架构: amd64, arm64
 
-# 使用 Debian Bookworm (稳定版) 而不是 Trixie (测试版)
-FROM python:3.10-slim-bookworm
+# 使用 Debian 最新稳定版
+# FROM python:3.11.15-trixie
+FROM m.daocloud.io/docker.io/library/python:3.11.15-trixie
 
 # 获取构建架构信息
 ARG TARGETARCH
