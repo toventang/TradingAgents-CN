@@ -59,3 +59,10 @@ class AuthService:
         except Exception as e:
             logger.error(f"❌ Token验证异常: {str(e)}")
             return None
+    @staticmethod
+    def get_canonical_user_id(token_data: Optional[TokenData]) -> Optional[str]:
+        """Convert verified token data into canonical user identity string."""
+        if not token_data or not token_data.sub:
+            return None
+        user_id = str(token_data.sub).strip()
+        return user_id if user_id else None
