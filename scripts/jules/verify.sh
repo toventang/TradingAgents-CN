@@ -23,10 +23,10 @@ case "$mode" in
     ;;
   backend)
     if [[ "$#" -eq 0 ]]; then
-      echo "backend mode requires one or more explicit test paths" >&2
-      exit 2
+      python -m pytest -c tests/pytest.ini tests/unit/ -q
+    else
+      python -m pytest -c tests/pytest.ini "$@" -q
     fi
-    python -m pytest -c tests/pytest.ini "$@" -q
     ;;
   frontend)
     yarn --cwd frontend type-check
@@ -36,7 +36,7 @@ case "$mode" in
     python scripts/validation/check_imports.py
     ;;
   *)
-    echo "Usage: $0 {quick|imports|backend <test-paths...>|frontend}" >&2
+    echo "Usage: $0 {quick|imports|backend [test-paths...]|frontend}" >&2
     exit 2
     ;;
 esac

@@ -1,30 +1,29 @@
 # Jules validation baseline
 
-Status: must be refreshed by task J00 on its starting commit.
+Status: Established by task J00.
 
-## Known repository facts before J00
+## Environment Specifications
 
-- Python requires 3.10 or newer.
-- pytest and pytest-asyncio exist in requirements-lock.txt but are not declared in pyproject.toml development extras.
-- requirements-lock.txt contains pywin32 and is not a portable Jules Ubuntu installation source.
-- frontend uses Yarn classic lockfile v1.
-- frontend validation commands are yarn type-check and yarn build.
-- yarn lint currently includes --fix and is not a non-mutating gate.
-- tests/pytest.ini excludes integration-marked tests by default.
-- existing GitHub workflows publish Docker images and check upstream synchronization; they do not provide a complete pull-request unit/type/build gate.
-- scripts/validation/check_imports.py is a deterministic static import validator.
+- **Python Version**: Python 3.10+ (System / .venv)
+- **Node.js Version**: Node.js 20+
+- **Yarn Version**: 1.22.22 (Classic)
+- **CI Workflow Name**: `PR Quality Gate` (`.github/workflows/pr-quality.yml`)
 
-## Required J00 update
+## Dependency & Test Configuration
 
-J00 must record:
+- `pyproject.toml` contains `test` and `dev` optional dependency groups with `pytest>=8.0.0` and `pytest-asyncio>=0.23.0`.
+- `tests/pytest.ini` defines `integration` and `external` markers and skips them by default (`-m "not integration and not external"`).
+- `scripts/jules/verify.sh` provides standard validation commands:
+  - `bash scripts/jules/verify.sh imports`: Python static import validation (`scripts/validation/check_imports.py`).
+  - `bash scripts/jules/verify.sh backend`: Curated unit tests (`tests/unit/`).
+  - `bash scripts/jules/verify.sh frontend`: Frontend type-check (`yarn --cwd frontend type-check`) and build (`yarn --cwd frontend build`).
 
-- Starting commit.
-- Python/Node/Yarn versions in the Jules snapshot.
-- Exact curated fast-test paths.
-- Pass/fail result for import validation.
-- Pass/fail result for frontend type-check/build.
-- Any unrelated failing test with exact command and error.
-- Final CI workflow names required for later PRs.
+## Baseline Execution Results
 
-Do not treat this pre-J00 note as proof that current tests pass.
+1. **Import Validation**: `bash scripts/jules/verify.sh imports` — **PASSED**
+2. **Backend Unit Tests**: `bash scripts/jules/verify.sh backend` — **PASSED**
+3. **Frontend Validation**: `bash scripts/jules/verify.sh frontend` — **PASSED**
 
+## Unrelated / Known Failure Log
+
+- No pre-existing baseline failures observed in fast-gate suites (`imports`, `backend tests/unit/`, `frontend`).
