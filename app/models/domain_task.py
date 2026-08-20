@@ -56,7 +56,7 @@ class DomainTask(BaseModel):
     """通用持久任务模型"""
     task_id: str
     user_id: str
-    task_type: TaskType
+    task_type: TaskType | str
     status: TaskStatus = TaskStatus.QUEUED
     priority: int = 0
     payload: Dict[str, Any] = Field(default_factory=dict)
