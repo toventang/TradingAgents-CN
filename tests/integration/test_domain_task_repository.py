@@ -67,11 +67,18 @@ class FakeCollection:
             elif k == "status" and isinstance(v, dict):
                 if "$in" in v and doc.get(k) not in v["$in"]:
                     return False
-            elif k == "lease_expires_at" and isinstance(v, dict):
-                if "$lt" in v:
-                    expires = doc.get(k)
-                    if not expires or expires >= v["$lt"]:
-                        return False
+            elif isinstance(v, dict):
+                val = doc.get(k)
+                if "$lt" in v and not (val and val < v["$lt"]):
+                    return False
+                if "$lte" in v and not (val and val <= v["$lte"]):
+                    return False
+                if "$gt" in v and not (val and val > v["$gt"]):
+                    return False
+                if "$gte" in v and not (val and val >= v["$gte"]):
+                    return False
+                if "$in" in v and val not in v["$in"]:
+                    return False
             elif k != "$or" and doc.get(k) != v:
                 return False
         return True
