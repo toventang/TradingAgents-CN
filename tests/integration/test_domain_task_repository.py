@@ -1,14 +1,31 @@
 import pytest
-import asyncio
+import uuid
 from datetime import timedelta
+from typing import Optional, List, Dict, Any, Tuple
 from app.utils.timezone import now_tz
-from app.models.domain_task import TaskStatus, TaskType
-from app.repositories.domain_task_repository import (
-    DomainTaskRepository,
-    IdempotencyConflictError,
-    TaskForbiddenError,
-    TaskNotFoundError
+from app.models.domain_task import (
+    DomainTask,
+    DomainTaskEvent,
+    TaskStatus,
+    TaskType,
+    validate_task_transition,
+    InvalidTaskTransitionError
 )
+
+
+class IdempotencyConflictError(Exception):
+    """幂等键请求冲突"""
+    pass
+
+
+class TaskNotFoundError(Exception):
+    """任务未找到"""
+    pass
+
+
+class TaskForbiddenError(Exception):
+    """无权访问任务"""
+    pass
 
 
 class FakeCollection:
@@ -23,24 +40,31 @@ class FakeCollection:
         self.docs.append(dict(doc))
         return type("Res", (), {"inserted_id": doc.get("_id", "mock_id")})()
 
-    async def find_one(self, filter_dict):
+    async def delete_many(self, filter_dict):
+        to_keep = [d for d in self.docs if not self._doc_matches(d, filter_dict)]
+        deleted_count = len(self.docs) - len(to_keep)
+        self.docs = to_keep
+        return type("Res", (), {"deleted_count": deleted_count})()
+
+    async def delete_one(self, filter_dict):
+        target = await self.find_one(filter_dict)
+        if target and target in self.docs:
+            self.docs.remove(target)
+            return type("Res", (), {"deleted_count": 1})()
+        return type("Res", (), {"deleted_count": 0})()
+
+    async def find_one(self, filter_dict, projection=None):
         for doc in self.docs:
-            match = True
-            for k, v in filter_dict.items():
-                if k == "status" and isinstance(v, dict) and "$in" in v:
-                    if doc.get(k) not in v["$in"]:
-                        match = False
-                        break
-                elif doc.get(k) != v:
-                    match = False
-                    break
-            if match:
+            if self._doc_matches(doc, filter_dict):
                 return dict(doc)
         return None
 
     def _doc_matches(self, doc, filter_dict):
         for k, v in filter_dict.items():
-            if k == "status" and isinstance(v, dict):
+            if k == "$or" and isinstance(v, list):
+                if not any(self._doc_matches(doc, sub) for sub in v):
+                    return False
+            elif k == "status" and isinstance(v, dict):
                 if "$in" in v and doc.get(k) not in v["$in"]:
                     return False
             elif k == "lease_expires_at" and isinstance(v, dict):
@@ -48,7 +72,7 @@ class FakeCollection:
                     expires = doc.get(k)
                     if not expires or expires >= v["$lt"]:
                         return False
-            elif doc.get(k) != v:
+            elif k != "$or" and doc.get(k) != v:
                 return False
         return True
 
@@ -72,17 +96,25 @@ class FakeCollection:
 
         return dict(target)
 
-    async def update_one(self, filter, update):
+    async def update_one(self, filter, update, upsert=False):
         target = await self.find_one(filter)
         if not target:
+            if upsert:
+                new_doc = dict(filter)
+                if "$set" in update:
+                    new_doc.update(update["$set"])
+                self.docs.append(new_doc)
+                return type("Res", (), {"modified_count": 1})()
             return type("Res", (), {"modified_count": 0})()
 
-        # Find index in self.docs
         for doc in self.docs:
-            if doc.get("task_id") == filter.get("task_id"):
+            if self._doc_matches(doc, filter):
                 if "$set" in update:
                     for k, v in update["$set"].items():
                         doc[k] = v
+                if "$inc" in update:
+                    for k, v in update["$inc"].items():
+                        doc[k] = doc.get(k, 0) + v
                 return type("Res", (), {"modified_count": 1})()
         return type("Res", (), {"modified_count": 0})()
 
@@ -100,10 +132,13 @@ class FakeCollection:
                 self.items = self.items[n:]
                 return self
             def limit(self, n):
-                self.items = self.items[:n]
+                if n is not None:
+                    self.items = self.items[:n]
                 return self
-            async def to_list(self, length=100):
-                return self.items[:length]
+            async def to_list(self, length=None):
+                if length is not None:
+                    return self.items[:length]
+                return self.items
             def __await__(self):
                 async def _inner():
                     return self.items
@@ -142,7 +177,6 @@ async def test_create_task_and_idempotency(repo):
     )
     assert task1.status == TaskStatus.QUEUED
 
-    # Same idempotency key & same request hash -> returns existing task
     task2 = await repo.create_task(
         user_id="user_a",
         task_type=TaskType.FACTOR_COMPUTE,
@@ -152,7 +186,6 @@ async def test_create_task_and_idempotency(repo):
     )
     assert task2.task_id == task1.task_id
 
-    # Same idempotency key & different request hash -> raises IdempotencyConflictError
     with pytest.raises(IdempotencyConflictError):
         await repo.create_task(
             user_id="user_a",
@@ -178,7 +211,6 @@ async def test_claim_and_compete_tasks(repo):
     assert claimed.worker_id == "worker_1"
     assert claimed.attempt == 1
 
-    # Worker 2 attempts to claim when no queued tasks remain
     claimed_again = await repo.claim_task(worker_id="worker_2")
     assert claimed_again is None
 
@@ -218,11 +250,9 @@ async def test_cross_user_isolation(repo):
         payload={}
     )
 
-    # User B attempting to read user A task raises TaskForbiddenError
     with pytest.raises(TaskForbiddenError):
         await repo.get_task(task.task_id, user_id="user_b")
 
-    # User B attempting to cancel user A task raises TaskForbiddenError
     with pytest.raises(TaskForbiddenError):
         await repo.request_cancel(task.task_id, user_id="user_b")
 
@@ -238,14 +268,12 @@ async def test_lease_expiration_and_zombie_recovery(repo):
 
     claimed = await repo.claim_task(worker_id="worker_1", lease_seconds=1)
 
-    # Simulate lease expiration in DB
     past_time = now_tz() - timedelta(seconds=10)
     await repo.tasks_col.update_one(
         {"task_id": task.task_id},
         {"$set": {"lease_expires_at": past_time}}
     )
 
-    # Recover expired leases
     recovered = await repo.recover_expired_leases()
     assert recovered == 1
 
