@@ -144,21 +144,24 @@ class OperationLogMiddleware(BaseHTTPMiddleware):
 
             # 尝试从Authorization头解析用户信息
             auth_header = request.headers.get("authorization")
+            token = None
             if auth_header and auth_header.startswith("Bearer "):
                 token = auth_header.split(" ", 1)[1]
+            elif "token" in request.query_params:
+                token = request.query_params["token"]
 
-                # 使用AuthService验证token
+            if token:
                 from app.services.auth_service import AuthService
                 token_data = AuthService.verify_token(token)
+                user_id = AuthService.get_canonical_user_id(token_data)
 
-                if token_data:
-                    # 返回用户信息（开源版只有admin用户）
+                if user_id:
                     return {
-                        "id": "admin",
-                        "username": "admin",
-                        "name": "管理员",
-                        "is_admin": True,
-                        "roles": ["admin"]
+                        "id": user_id,
+                        "username": user_id,
+                        "name": user_id,
+                        "is_admin": False,
+                        "roles": ["user"]
                     }
 
             return None
@@ -247,12 +250,21 @@ class OperationLogMiddleware(BaseHTTPMiddleware):
             action_type = self._get_action_type(path)
             action = self._get_action_description(method, path, request)
 
-            # 构建详细信息
+            # 构建详细信息并脱敏敏感参数
+            SENSITIVE_KEYS = {"token", "access_token", "refresh_token", "jwt", "authorization", "secret", "password", "api_key", "key"}
+            raw_query = dict(request.query_params) if request.query_params else None
+            sanitized_query = None
+            if raw_query:
+                sanitized_query = {
+                    k: ("[REDACTED]" if k.lower() in SENSITIVE_KEYS else v)
+                    for k, v in raw_query.items()
+                }
+
             details = {
                 "method": method,
                 "path": path,
                 "status_code": response.status_code,
-                "query_params": dict(request.query_params) if request.query_params else None,
+                "query_params": sanitized_query,
             }
 
             # 获取错误信息（如果有）
