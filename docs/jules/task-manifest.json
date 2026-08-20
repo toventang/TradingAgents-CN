@@ -1,0 +1,586 @@
+{
+  "schema_version": 1,
+  "program": "tradingagents-cn-feature-enhancement",
+  "default_starting_branch": "main",
+  "default_automation_mode": "AUTO_CREATE_PR",
+  "default_max_concurrency": 1,
+  "instructions": [
+    "Dispatch exactly one task per Jules session.",
+    "A task is ready only when every depends_on task is merged into the starting branch.",
+    "Use the prompt exactly as the session base prompt; clarifications may narrow but not broaden it.",
+    "High-risk tasks require plan approval.",
+    "Do not auto-merge a PR until its required checks pass."
+  ],
+  "tasks": [
+    {
+      "id": "J00",
+      "title": "Establish deterministic test and CI baseline",
+      "risk": "medium",
+      "depends_on": [],
+      "task_file": "docs/jules/tasks/phase-0-foundations.md",
+      "section": "J00",
+      "require_plan_approval": false,
+      "prompt": "Execute only task J00 from docs/jules/tasks/phase-0-foundations.md. Read AGENTS.md first. Establish the deterministic Jules test and CI baseline exactly within J00 scope, add the required tests and baseline evidence, run every required validation command, and do not begin J01 or any feature implementation."
+    },
+    {
+      "id": "J01",
+      "title": "Fix authenticated identity and realtime isolation",
+      "risk": "high",
+      "depends_on": ["J00"],
+      "task_file": "docs/jules/tasks/phase-0-foundations.md",
+      "section": "J01",
+      "require_plan_approval": true,
+      "prompt": "Execute only J01 from docs/jules/tasks/phase-0-foundations.md on a branch containing merged J00. Read AGENTS.md first. Fix real authenticated identity and cross-user realtime/audit isolation, add all specified negative tests, run the exact validation, and stop without starting J02 or later work."
+    },
+    {
+      "id": "J02",
+      "title": "Introduce canonical market and symbol normalization",
+      "risk": "medium",
+      "depends_on": ["J00"],
+      "task_file": "docs/jules/tasks/phase-0-foundations.md",
+      "section": "J02",
+      "require_plan_approval": false,
+      "prompt": "Execute only J02 from docs/jules/tasks/phase-0-foundations.md on a branch containing merged J00. Implement the pure canonical market+symbol contract and compatibility adapters with all specified tests. Do not migrate collections or change unrelated business flows."
+    },
+    {
+      "id": "J03",
+      "title": "Add durable domain-task repository and state machine",
+      "risk": "high",
+      "depends_on": ["J01", "J02"],
+      "task_file": "docs/jules/tasks/phase-0-foundations.md",
+      "section": "J03",
+      "require_plan_approval": true,
+      "prompt": "Execute only J03 from docs/jules/tasks/phase-0-foundations.md after J01 and J02 are merged. Implement the persistent domain-task model, state machine, ownership, idempotency, leases, retries, cancellation, events, indexes, and concurrency tests. Do not add a worker or feature handler."
+    },
+    {
+      "id": "J04",
+      "title": "Add domain worker, handler registry, and task API",
+      "risk": "high",
+      "depends_on": ["J03"],
+      "task_file": "docs/jules/tasks/phase-0-foundations.md",
+      "section": "J04",
+      "require_plan_approval": true,
+      "prompt": "Execute only J04 from docs/jules/tasks/phase-0-foundations.md after J03 is merged. Add the explicit handler protocol/registry, durable worker lifecycle, progress/cancel/retry behavior, and owner-scoped task APIs with tests. Do not register factor, backtest, alert, or automation handlers."
+    },
+    {
+      "id": "J05",
+      "title": "Extract paper-trading domain services",
+      "risk": "high",
+      "depends_on": ["J04"],
+      "task_file": "docs/jules/tasks/phase-0-foundations.md",
+      "section": "J05",
+      "require_plan_approval": true,
+      "prompt": "Execute only J05 from docs/jules/tasks/phase-0-foundations.md after J04 is merged. Extract current manual paper-trading logic into focused services without changing public behavior, characterize behavior with tests, and do not add portfolios, campaigns, lots, or new UI."
+    },
+    {
+      "id": "J10",
+      "title": "Define market data, point-in-time, calendar, and quality contracts",
+      "risk": "high",
+      "depends_on": ["J02", "J04"],
+      "task_file": "docs/jules/tasks/phase-1-factors.md",
+      "section": "J10",
+      "require_plan_approval": true,
+      "prompt": "Execute only J10 from docs/jules/tasks/phase-1-factors.md. Implement normalized read contracts for OHLCV, publication-time financial/news visibility, market calendars, benchmarks, source versions, and data quality, with deterministic tests. Do not implement factors or rewrite providers."
+    },
+    {
+      "id": "J11",
+      "title": "Implement FactorDefinition and 171-factor registry metadata",
+      "risk": "medium",
+      "depends_on": ["J03"],
+      "task_file": "docs/jules/tasks/phase-1-factors.md",
+      "section": "J11",
+      "require_plan_approval": false,
+      "prompt": "Execute only J11 from docs/jules/tasks/phase-1-factors.md. Implement FactorDefinition and the exact versioned 171-factor metadata catalog, dependency validation, checksum mirror, and exact count tests. Do not implement formulas or APIs."
+    },
+    {
+      "id": "J12",
+      "title": "Implement price, trend, and momentum factors",
+      "risk": "high",
+      "depends_on": ["J10", "J11"],
+      "task_file": "docs/jules/tasks/phase-1-factors.md",
+      "section": "J12",
+      "require_plan_approval": true,
+      "prompt": "Execute only J12 from docs/jules/tasks/phase-1-factors.md. Implement all 59 specified price, trend, and momentum factors with shared deterministic helpers and hand-calculated edge-case tests. Do not implement other groups, APIs, or UI."
+    },
+    {
+      "id": "J13",
+      "title": "Implement volatility, risk, and liquidity factors",
+      "risk": "high",
+      "depends_on": ["J10", "J11", "J12"],
+      "task_file": "docs/jules/tasks/phase-1-factors.md",
+      "section": "J13",
+      "require_plan_approval": true,
+      "prompt": "Execute only J13 from docs/jules/tasks/phase-1-factors.md after J12 is merged. Implement all 39 volatility/risk and liquidity factors with benchmark/date/unit semantics and hand-calculated tests. Reuse J12 common helpers without broad refactoring."
+    },
+    {
+      "id": "J14",
+      "title": "Implement valuation, quality, and growth factors",
+      "risk": "high",
+      "depends_on": ["J10", "J11", "J13"],
+      "task_file": "docs/jules/tasks/phase-1-factors.md",
+      "section": "J14",
+      "require_plan_approval": true,
+      "prompt": "Execute only J14 from docs/jules/tasks/phase-1-factors.md after J13 is merged. Implement all 51 point-in-time valuation, quality, and growth factors without estimates or future visibility, with publication-boundary tests. Do not change providers or analyst prompts."
+    },
+    {
+      "id": "J15",
+      "title": "Implement sentiment, event, and fixed composite factors",
+      "risk": "high",
+      "depends_on": ["J10", "J11", "J14"],
+      "task_file": "docs/jules/tasks/phase-1-factors.md",
+      "section": "J15",
+      "require_plan_approval": true,
+      "prompt": "Execute only J15 from docs/jules/tasks/phase-1-factors.md after J14 is merged. Implement all 22 structured sentiment/event/cross-sectional/fixed-composite factors and tests. Do not call LLMs or implement the user composite DSL."
+    },
+    {
+      "id": "J16",
+      "title": "Build parallel factor computation and immutable snapshots",
+      "risk": "high",
+      "depends_on": ["J12", "J13", "J14", "J15"],
+      "task_file": "docs/jules/tasks/phase-1-factors.md",
+      "section": "J16",
+      "require_plan_approval": true,
+      "prompt": "Execute only J16 from docs/jules/tasks/phase-1-factors.md. Build the bounded DAG/chunk factor engine, durable handler, batched persistence, cancellation/retry, completeness checks, immutable publication, and failure/concurrency tests. Do not add UI or strategy signals."
+    },
+    {
+      "id": "J17",
+      "title": "Add factor backend APIs",
+      "risk": "medium",
+      "depends_on": ["J16"],
+      "task_file": "docs/jules/tasks/phase-1-factors.md",
+      "section": "J17",
+      "require_plan_approval": false,
+      "prompt": "Execute only J17 from docs/jules/tasks/phase-1-factors.md. Add authenticated definition, validation, compute, job, snapshot, and paginated value APIs with stable errors and tests. Exclude research and user composite endpoints."
+    },
+    {
+      "id": "J18",
+      "title": "Add factor catalog, compute, and snapshot UI",
+      "risk": "medium",
+      "depends_on": ["J17"],
+      "task_file": "docs/jules/tasks/phase-1-factors.md",
+      "section": "J18",
+      "require_plan_approval": false,
+      "prompt": "Execute only J18 from docs/jules/tasks/phase-1-factors.md. Add authenticated factor catalog, compute form, durable task restoration, snapshots, quality, and paginated values. Run frontend type-check/build and do not add research/composite screens."
+    },
+    {
+      "id": "J19",
+      "title": "Implement factor research analytics and API",
+      "risk": "high",
+      "depends_on": ["J16", "J17"],
+      "task_file": "docs/jules/tasks/phase-1-factors.md",
+      "section": "J19",
+      "require_plan_approval": true,
+      "prompt": "Execute only J19 from docs/jules/tasks/phase-1-factors.md. Implement leakage-safe IC, quantile, turnover, correlation, exposure, decay analytics and durable APIs with explicit future-label tests. Do not add UI or composite DSL."
+    },
+    {
+      "id": "J1A",
+      "title": "Implement safe user composite-factor DSL and API",
+      "risk": "high",
+      "depends_on": ["J16", "J17", "J19"],
+      "task_file": "docs/jules/tasks/phase-1-factors.md",
+      "section": "J1A",
+      "require_plan_approval": true,
+      "prompt": "Execute only J1A from docs/jules/tasks/phase-1-factors.md. Implement the closed composite-factor DSL, ownership, immutable versions, contribution semantics, and negative security tests. Never use eval, exec, or arbitrary expressions; do not add UI."
+    },
+    {
+      "id": "J1B",
+      "title": "Add factor research and composite UI",
+      "risk": "medium",
+      "depends_on": ["J18", "J19", "J1A"],
+      "task_file": "docs/jules/tasks/phase-1-factors.md",
+      "section": "J1B",
+      "require_plan_approval": false,
+      "prompt": "Execute only J1B from docs/jules/tasks/phase-1-factors.md. Add factor research visualizations and a structured composite editor with validation, contribution, exposure, samples, and warnings. Run frontend checks and provide no executable code editor."
+    },
+    {
+      "id": "J20",
+      "title": "Add immutable strategy and universe persistence",
+      "risk": "high",
+      "depends_on": ["J1A"],
+      "task_file": "docs/jules/tasks/phase-2-strategies.md",
+      "section": "J20",
+      "require_plan_approval": true,
+      "prompt": "Execute only J20 from docs/jules/tasks/phase-2-strategies.md. Implement owner-scoped Strategy, immutable StrategyVersion, UniverseSnapshot, StrategySignal persistence, indexes, lifecycle, checksums, and concurrency tests. Do not implement signal logic or UI."
+    },
+    {
+      "id": "J21",
+      "title": "Implement strategy DSL validator and signal engine",
+      "risk": "high",
+      "depends_on": ["J20", "J19"],
+      "task_file": "docs/jules/tasks/phase-2-strategies.md",
+      "section": "J21",
+      "require_plan_approval": true,
+      "prompt": "Execute only J21 from docs/jules/tasks/phase-2-strategies.md. Implement the closed strategy DSL validator and deterministic signal engine with fixed snapshots, tie-breaking, reason codes, no-look-ahead rejection, and tests. Do not add templates, APIs, or backtesting."
+    },
+    {
+      "id": "J22",
+      "title": "Deliver 14 system strategy templates",
+      "risk": "high",
+      "depends_on": ["J21"],
+      "task_file": "docs/jules/tasks/phase-2-strategies.md",
+      "section": "J22",
+      "require_plan_approval": true,
+      "prompt": "Execute only J22 from docs/jules/tasks/phase-2-strategies.md. Implement, seed idempotently, document, and test exactly the 14 read-only system templates. Do not add APIs or UI."
+    },
+    {
+      "id": "J23",
+      "title": "Add versioned AnalysisProfile compatibility",
+      "risk": "medium",
+      "depends_on": ["J20"],
+      "task_file": "docs/jules/tasks/phase-2-strategies.md",
+      "section": "J23",
+      "require_plan_approval": false,
+      "prompt": "Execute only J23 from docs/jules/tasks/phase-2-strategies.md. Persist versioned AnalysisProfiles and resolve profile or legacy parameters into one validated runtime contract with conflict and compatibility tests. Do not integrate Skills yet."
+    },
+    {
+      "id": "J24",
+      "title": "Add strategy and AnalysisProfile APIs",
+      "risk": "medium",
+      "depends_on": ["J22", "J23"],
+      "task_file": "docs/jules/tasks/phase-2-strategies.md",
+      "section": "J24",
+      "require_plan_approval": false,
+      "prompt": "Execute only J24 from docs/jules/tasks/phase-2-strategies.md. Add all specified strategy/template/version/clone/validate/publish/signal and AnalysisProfile APIs with ownership and tests. Do not add frontend or backtesting."
+    },
+    {
+      "id": "J25",
+      "title": "Add strategy center and profile UI",
+      "risk": "medium",
+      "depends_on": ["J24"],
+      "task_file": "docs/jules/tasks/phase-2-strategies.md",
+      "section": "J25",
+      "require_plan_approval": false,
+      "prompt": "Execute only J25 from docs/jules/tasks/phase-2-strategies.md. Add the authenticated strategy center, structured wizard, versions/diff, validation/publish flow, signal list, and AnalysisProfile UI. Run frontend validation and do not add executable rule code."
+    },
+    {
+      "id": "J30",
+      "title": "Build point-in-time backtest input layer",
+      "risk": "high",
+      "depends_on": ["J22", "J10"],
+      "task_file": "docs/jules/tasks/phase-3-backtest.md",
+      "section": "J30",
+      "require_plan_approval": true,
+      "prompt": "Execute only J30 from docs/jules/tasks/phase-3-backtest.md. Implement reproducible point-in-time history, historical universes, publication visibility, corporate actions, benchmarks, and dated market rules with bias-catching tests. Do not implement broker or metrics."
+    },
+    {
+      "id": "J31",
+      "title": "Implement simulated broker and execution rules",
+      "risk": "high",
+      "depends_on": ["J30", "J05"],
+      "task_file": "docs/jules/tasks/phase-3-backtest.md",
+      "section": "J31",
+      "require_plan_approval": true,
+      "prompt": "Execute only J31 from docs/jules/tasks/phase-3-backtest.md. Implement the reusable broker/execution, fees, slippage, lots, T+1, suspension, price limits, partial fills, expiry, and conflict rules with hand-calculated fixtures. Do not implement the engine loop or metrics."
+    },
+    {
+      "id": "J32",
+      "title": "Implement daily backtest engine and ledgers",
+      "risk": "high",
+      "depends_on": ["J31"],
+      "task_file": "docs/jules/tasks/phase-3-backtest.md",
+      "section": "J32",
+      "require_plan_approval": true,
+      "prompt": "Execute only J32 from docs/jules/tasks/phase-3-backtest.md. Implement the exact daily event order, ledgers, orders/trades/positions/equity/events, durable progress/cancel, reconciliation, and tests. Do not add metrics interpretation or frontend."
+    },
+    {
+      "id": "J33",
+      "title": "Implement deterministic backtest performance",
+      "risk": "high",
+      "depends_on": ["J32"],
+      "task_file": "docs/jules/tasks/phase-3-backtest.md",
+      "section": "J33",
+      "require_plan_approval": true,
+      "prompt": "Execute only J33 from docs/jules/tasks/phase-3-backtest.md. Implement every specified deterministic performance metric and formula with hand-calculated tests and edge cases. Do not use an LLM or add APIs."
+    },
+    {
+      "id": "J34",
+      "title": "Add backtest APIs and exports",
+      "risk": "medium",
+      "depends_on": ["J33"],
+      "task_file": "docs/jules/tasks/phase-3-backtest.md",
+      "section": "J34",
+      "require_plan_approval": false,
+      "prompt": "Execute only J34 from docs/jules/tasks/phase-3-backtest.md. Add owner-scoped backtest create/list/detail/cancel/result/compare/export APIs with bounded pagination and tests. Exclude parameter search and frontend."
+    },
+    {
+      "id": "J35",
+      "title": "Add backtest creation and result UI",
+      "risk": "medium",
+      "depends_on": ["J34"],
+      "task_file": "docs/jules/tasks/phase-3-backtest.md",
+      "section": "J35",
+      "require_plan_approval": false,
+      "prompt": "Execute only J35 from docs/jules/tasks/phase-3-backtest.md. Add authenticated backtest creation, progress/cancel, results, warnings, charts, trades, positions, events, exports, and comparison UI. Run frontend checks and omit parameter lab."
+    },
+    {
+      "id": "J36",
+      "title": "Add parameter search and walk-forward evaluation",
+      "risk": "high",
+      "depends_on": ["J33", "J34"],
+      "task_file": "docs/jules/tasks/phase-3-backtest.md",
+      "section": "J36",
+      "require_plan_approval": true,
+      "prompt": "Execute only J36 from docs/jules/tasks/phase-3-backtest.md. Implement bounded parameter grids, time splits, walk-forward, child runs, stability and parameter-lab UI with tests. Never auto-publish an in-sample winner."
+    },
+    {
+      "id": "J40",
+      "title": "Add versioned alert rules and state semantics",
+      "risk": "high",
+      "depends_on": ["J01", "J17"],
+      "task_file": "docs/jules/tasks/phase-4-alerts.md",
+      "section": "J40",
+      "require_plan_approval": true,
+      "prompt": "Execute only J40 from docs/jules/tasks/phase-4-alerts.md. Implement owner-scoped alert rule/state/event models and exact trigger, unknown, cooldown, recovery, quota, version, and scope semantics with tests. Do not add scheduler, delivery, or UI."
+    },
+    {
+      "id": "J41",
+      "title": "Implement grouped realtime alert evaluation",
+      "risk": "high",
+      "depends_on": ["J40", "J16"],
+      "task_file": "docs/jules/tasks/phase-4-alerts.md",
+      "section": "J41",
+      "require_plan_approval": true,
+      "prompt": "Execute only J41 from docs/jules/tasks/phase-4-alerts.md. Implement grouped snapshot evaluation, sessions, staleness, distributed lock, atomic state, idempotent events, durable handler, and concurrency tests. Do not add UI or paper actions."
+    },
+    {
+      "id": "J42",
+      "title": "Harden notification delivery and migrate favorite alerts",
+      "risk": "high",
+      "depends_on": ["J41"],
+      "task_file": "docs/jules/tasks/phase-4-alerts.md",
+      "section": "J42",
+      "require_plan_approval": true,
+      "prompt": "Execute only J42 from docs/jules/tasks/phase-4-alerts.md. Implement structured correct-user multi-instance notification delivery, Mongo fallback, and idempotent favorite-threshold migration with tests. Do not add external channels or UI."
+    },
+    {
+      "id": "J43",
+      "title": "Add alert APIs and health",
+      "risk": "medium",
+      "depends_on": ["J42"],
+      "task_file": "docs/jules/tasks/phase-4-alerts.md",
+      "section": "J43",
+      "require_plan_approval": false,
+      "prompt": "Execute only J43 from docs/jules/tasks/phase-4-alerts.md. Add all specified owner-scoped alert rule, validation, preview, event, acknowledgement, test-notification, and health APIs with quotas and tests. Do not add UI or trade actions."
+    },
+    {
+      "id": "J44",
+      "title": "Add monitoring center and alert UI",
+      "risk": "medium",
+      "depends_on": ["J43"],
+      "task_file": "docs/jules/tasks/phase-4-alerts.md",
+      "section": "J44",
+      "require_plan_approval": false,
+      "prompt": "Execute only J44 from docs/jules/tasks/phase-4-alerts.md. Add authenticated monitoring, rule wizard/list, event center, acknowledgement, latency/quality display, favorite compatibility, and deduplicated critical UX. Run frontend checks."
+    },
+    {
+      "id": "J50",
+      "title": "Add Skill manifest, registry, assignment, and tool permissions",
+      "risk": "high",
+      "depends_on": ["J23"],
+      "task_file": "docs/jules/tasks/phase-5-skills.md",
+      "section": "J50",
+      "require_plan_approval": true,
+      "prompt": "Execute only J50 from docs/jules/tasks/phase-5-skills.md. Implement immutable runtime Skill manifests, dependency/assignment precedence, budgets, cache policy, and closed tool permissions with security tests. Do not execute Skills or load arbitrary code."
+    },
+    {
+      "id": "J51",
+      "title": "Implement deterministic built-in Skills",
+      "risk": "high",
+      "depends_on": ["J50", "J19"],
+      "task_file": "docs/jules/tasks/phase-5-skills.md",
+      "section": "J51",
+      "require_plan_approval": true,
+      "prompt": "Execute only J51 from docs/jules/tasks/phase-5-skills.md. Implement the specified deterministic built-in runtime Skills with schema-first models, evidence, warnings, budgets, golden fixtures, and no side effects. Do not call LLMs or integrate the graph."
+    },
+    {
+      "id": "J52",
+      "title": "Implement LLM/composite Skill executor and remaining Skills",
+      "risk": "high",
+      "depends_on": ["J50", "J51"],
+      "task_file": "docs/jules/tasks/phase-5-skills.md",
+      "section": "J52",
+      "require_plan_approval": true,
+      "prompt": "Execute only J52 from docs/jules/tasks/phase-5-skills.md. Implement schema-validated LLM/composite execution, budgets, read-only tool whitelist, repair/failure/cache behavior, and remaining built-in schemas using fake LLM tests. Do not change LangGraph yet."
+    },
+    {
+      "id": "J53",
+      "title": "Integrate runtime Skills into LangGraph",
+      "risk": "high",
+      "depends_on": ["J52", "J23"],
+      "task_file": "docs/jules/tasks/phase-5-skills.md",
+      "section": "J53",
+      "require_plan_approval": true,
+      "prompt": "Execute only J53 from docs/jules/tasks/phase-5-skills.md. Resolve AnalysisProfiles, execute declared Skills by role, store exact version/evidence results, inject bounded structured summaries, and preserve disabled legacy behavior with tests. Do not add UI or trading writes."
+    },
+    {
+      "id": "J54",
+      "title": "Add runtime Skill APIs",
+      "risk": "medium",
+      "depends_on": ["J53"],
+      "task_file": "docs/jules/tasks/phase-5-skills.md",
+      "section": "J54",
+      "require_plan_approval": false,
+      "prompt": "Execute only J54 from docs/jules/tasks/phase-5-skills.md. Add owner-scoped catalog, version, draft, validate, test, publish, clone, assignment, and redacted execution APIs with tests. Never add arbitrary code upload."
+    },
+    {
+      "id": "J55",
+      "title": "Add runtime Skill UI",
+      "risk": "medium",
+      "depends_on": ["J54"],
+      "task_file": "docs/jules/tasks/phase-5-skills.md",
+      "section": "J55",
+      "require_plan_approval": false,
+      "prompt": "Execute only J55 from docs/jules/tasks/phase-5-skills.md. Add authenticated Skill catalog/config/test/publish/assignment/effective-source and redacted execution-history UI. Run frontend checks; provide no code upload/editor."
+    },
+    {
+      "id": "J60",
+      "title": "Add paper portfolios, lots, ledger, and migration",
+      "risk": "high",
+      "depends_on": ["J05", "J31"],
+      "task_file": "docs/jules/tasks/phase-6-automation.md",
+      "section": "J60",
+      "require_plan_approval": true,
+      "prompt": "Execute only J60 from docs/jules/tasks/phase-6-automation.md. Add isolated paper portfolios, lots, order events, ledgers, reconciliation, concurrency, and idempotent legacy migration while preserving manual API defaults. Do not add campaigns or real brokerage."
+    },
+    {
+      "id": "J61",
+      "title": "Implement Campaign lifecycle and validation",
+      "risk": "high",
+      "depends_on": ["J60", "J24"],
+      "task_file": "docs/jules/tasks/phase-6-automation.md",
+      "section": "J61",
+      "require_plan_approval": true,
+      "prompt": "Execute only J61 from docs/jules/tasks/phase-6-automation.md. Implement Campaign states, activation validation, frozen fields, revisions, portfolio allocation, ownership, and non-retroactive start with tests. Do not run cycles or exits."
+    },
+    {
+      "id": "J62",
+      "title": "Implement Campaign cycles, candidates, and orders",
+      "risk": "high",
+      "depends_on": ["J61", "J41"],
+      "task_file": "docs/jules/tasks/phase-6-automation.md",
+      "section": "J62",
+      "require_plan_approval": true,
+      "prompt": "Execute only J62 from docs/jules/tasks/phase-6-automation.md. Implement idempotent post-activation cycles, fixed snapshots, all candidate/rejection records, deterministic allocation, orders, durable worker, and concurrency tests. Do not add exit rules or UI."
+    },
+    {
+      "id": "J63",
+      "title": "Implement Campaign risk exits",
+      "risk": "high",
+      "depends_on": ["J62"],
+      "task_file": "docs/jules/tasks/phase-6-automation.md",
+      "section": "J63",
+      "require_plan_approval": true,
+      "prompt": "Execute only J63 from docs/jules/tasks/phase-6-automation.md. Implement all specified position/portfolio risk exits, conflict priority, stale/T+1/limit blocking, cooldown, risk pause and confirmed resume with tests. Do not add attribution or UI."
+    },
+    {
+      "id": "J64",
+      "title": "Add Campaign performance, completion, APIs, and notifications",
+      "risk": "high",
+      "depends_on": ["J63", "J33"],
+      "task_file": "docs/jules/tasks/phase-6-automation.md",
+      "section": "J64",
+      "require_plan_approval": true,
+      "prompt": "Execute only J64 from docs/jules/tasks/phase-6-automation.md. Add daily equity, completion policies, deterministic performance/opportunity cost, owner APIs, and specified notifications with tests. Do not add frontend, attribution, or learning."
+    },
+    {
+      "id": "J65",
+      "title": "Add automatic simulation Campaign UI",
+      "risk": "medium",
+      "depends_on": ["J64"],
+      "task_file": "docs/jules/tasks/phase-6-automation.md",
+      "section": "J65",
+      "require_plan_approval": false,
+      "prompt": "Execute only J65 from docs/jules/tasks/phase-6-automation.md. Add the guarded Campaign wizard and complete activity/equity/candidate/position/lot/order/event/pause/resume/stop UI. Run frontend checks and do not add review/learning UI."
+    },
+    {
+      "id": "J70",
+      "title": "Implement deterministic trade attribution",
+      "risk": "high",
+      "depends_on": ["J64"],
+      "task_file": "docs/jules/tasks/phase-7-learning.md",
+      "section": "J70",
+      "require_plan_approval": true,
+      "prompt": "Execute only J70 from docs/jules/tasks/phase-7-learning.md. Implement deterministic TradeReviewInput, MAE/MFE, timing/execution/market/industry evidence and standard cause candidates with hand-calculated tests. Do not call an LLM or observe future exit windows."
+    },
+    {
+      "id": "J71",
+      "title": "Implement missed-upside legal counterfactuals",
+      "risk": "high",
+      "depends_on": ["J70"],
+      "task_file": "docs/jules/tasks/phase-7-learning.md",
+      "section": "J71",
+      "require_plan_approval": true,
+      "prompt": "Execute only J71 from docs/jules/tasks/phase-7-learning.md. Implement 5/10/20/60-day tradeable post-exit paths, benchmark excess, thresholds, severity, and legal counterfactuals without treating future highs as realizable profit. Add all tests."
+    },
+    {
+      "id": "J72",
+      "title": "Add evidence-bound AI trade review",
+      "risk": "high",
+      "depends_on": ["J71", "J53"],
+      "task_file": "docs/jules/tasks/phase-7-learning.md",
+      "section": "J72",
+      "require_plan_approval": true,
+      "prompt": "Execute only J72 from docs/jules/tasks/phase-7-learning.md. Add evidence-bound versioned AI review over immutable deterministic facts, standard causes, counter-evidence, controllability, and insufficient-evidence behavior using fake LLM tests. Never mutate trades or strategies."
+    },
+    {
+      "id": "J73",
+      "title": "Implement controlled learning proposals",
+      "risk": "high",
+      "depends_on": ["J72", "J36"],
+      "task_file": "docs/jules/tasks/phase-7-learning.md",
+      "section": "J73",
+      "require_plan_approval": true,
+      "prompt": "Execute only J73 from docs/jules/tasks/phase-7-learning.md. Implement evidence/sample gates, tunable whitelist, reviewable diffs, partial approval, validation backtests, and explicit strategy-draft creation with tests. Never auto-publish or mutate active campaigns."
+    },
+    {
+      "id": "J74",
+      "title": "Add trade review and learning UI",
+      "risk": "medium",
+      "depends_on": ["J73"],
+      "task_file": "docs/jules/tasks/phase-7-learning.md",
+      "section": "J74",
+      "require_plan_approval": false,
+      "prompt": "Execute only J74 from docs/jules/tasks/phase-7-learning.md. Add evidence/counter-evidence review, legal counterfactual charts, cause aggregation, sample gates, proposal diffs/review, validation, and separate draft/publish UI. Run frontend checks."
+    },
+    {
+      "id": "J75",
+      "title": "Add deterministic full-program E2E fixture",
+      "risk": "high",
+      "depends_on": ["J65", "J74"],
+      "task_file": "docs/jules/tasks/phase-7-learning.md",
+      "section": "J75",
+      "require_plan_approval": true,
+      "prompt": "Execute only J75 from docs/jules/tasks/phase-7-learning.md. Add the fixed no-network 20-stock/120-day end-to-end program test proving traceability, reconciliation, activation timing, isolation, exits, reviews, and learning draft without automatic publication. Do not add new product features."
+    },
+    {
+      "id": "J80",
+      "title": "Run cross-domain security and failure hardening",
+      "risk": "high",
+      "depends_on": ["J75"],
+      "task_file": "docs/jules/tasks/phase-8-hardening.md",
+      "section": "J80",
+      "require_plan_approval": true,
+      "prompt": "Execute only J80 from docs/jules/tasks/phase-8-hardening.md. Audit and test the completed program for ownership, auth, secret logging, realtime authorization, exports, arbitrary execution, stale actions, ledger freezing and feature shutdown; fix only demonstrated security/correctness defects."
+    },
+    {
+      "id": "J81",
+      "title": "Establish capacity and performance budgets",
+      "risk": "medium",
+      "depends_on": ["J80"],
+      "task_file": "docs/jules/tasks/phase-8-hardening.md",
+      "section": "J81",
+      "require_plan_approval": false,
+      "prompt": "Execute only J81 from docs/jules/tasks/phase-8-hardening.md. Add deterministic benchmarks and enforce/document configured limits for factors, backtests, alerts, campaigns, queues and Skills. Do not claim universal capacity or change public behavior without a decision."
+    },
+    {
+      "id": "J82",
+      "title": "Finalize deployment, migration, rollback, and rollout",
+      "risk": "high",
+      "depends_on": ["J81"],
+      "task_file": "docs/jules/tasks/phase-8-hardening.md",
+      "section": "J82",
+      "require_plan_approval": true,
+      "prompt": "Execute only J82 from docs/jules/tasks/phase-8-hardening.md. Finalize and verify non-destructive migrations, worker deployment, indexes, monitoring, backup, rollback, feature-flag rollout, incident runbooks, full deterministic gates, and evidence-based Definition of Done. Add no new domain feature."
+    }
+  ]
+}

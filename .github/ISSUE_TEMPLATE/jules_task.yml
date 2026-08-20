@@ -1,0 +1,45 @@
+name: Jules atomic implementation task
+description: Dispatch exactly one dependency-ready task to Google Jules
+title: "[JULES][J00] "
+labels:
+  - jules
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use one issue per task. Do not submit this issue until every dependency PR is merged.
+  - type: input
+    id: task_id
+    attributes:
+      label: Task ID
+      description: Exact ID from docs/jules/task-manifest.json
+      placeholder: J17
+    validations:
+      required: true
+  - type: textarea
+    id: dependencies
+    attributes:
+      label: Merged dependencies
+      description: List merged task IDs and PR or commit references.
+    validations:
+      required: true
+  - type: textarea
+    id: prompt
+    attributes:
+      label: Exact Jules prompt
+      description: Copy the prompt field for this task from task-manifest.json without combining tasks.
+    validations:
+      required: true
+  - type: checkboxes
+    id: preflight
+    attributes:
+      label: Preflight
+      options:
+        - label: AGENTS.md and docs/jules are present on the starting branch.
+          required: true
+        - label: Every depends_on task is merged.
+          required: true
+        - label: The Jules environment snapshot succeeds.
+          required: true
+        - label: This issue contains exactly one task ID.
+          required: true
