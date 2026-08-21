@@ -362,6 +362,12 @@ async def create_database_indexes(db):
         await market_quotes.create_index([("amount", -1)])
         await market_quotes.create_index([("updated_at", -1)])
 
+        from app.repositories.domain_task_repository import (
+            ensure_domain_task_indexes,
+        )
+
+        await ensure_domain_task_indexes(db)
+
         logger.info("✅ 数据库索引创建完成")
 
     except Exception as e:
