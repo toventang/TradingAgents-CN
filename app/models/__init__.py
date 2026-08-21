@@ -16,6 +16,7 @@ from .stock_models import (
     CurrencyType,
     StockStatus
 )
+from .symbol import CanonicalSymbol, Currency, Market
 
 __all__ = [
     "StockBasicInfoExtended",
@@ -28,5 +29,8 @@ __all__ = [
     "MarketType",
     "ExchangeType",
     "CurrencyType",
-    "StockStatus"
+    "StockStatus",
+    "CanonicalSymbol",
+    "Currency",
+    "Market",
 ]
