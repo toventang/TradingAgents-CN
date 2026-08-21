@@ -18,8 +18,7 @@ fi
 
 source .venv/bin/activate
 python -m pip install --upgrade pip setuptools wheel
-python -m pip install -e .
-python -m pip install pytest==8.4.2 pytest-asyncio==1.2.0
+python -m pip install -e ".[dev]"
 
 if command -v corepack >/dev/null 2>&1; then
   corepack enable

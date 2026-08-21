@@ -89,6 +89,10 @@ dependencies = [
 
 [project.optional-dependencies]
 qianfan = ["qianfan>=0.4.20"]
+dev = [
+    "pytest==8.4.2",
+    "pytest-asyncio==1.2.0",
+]
 
 [project.scripts]
 tradingagents = "main:main"
