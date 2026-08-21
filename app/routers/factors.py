@@ -3,7 +3,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status, Response
 from pydantic import BaseModel, Field
 from app.routers.auth_db import get_current_user
 from app.core.database import get_mongo_db
-from app.models.factor import FactorDefinition, FactorCategory
+from app.models.factor import FactorDefinition, FactorCategory, CompositeFactorSpec
+from app.services.factors.composites import CompositeFactorService
 from app.models.domain_task import TaskType
 from app.services.factors.registry import global_factor_registry
 from app.repositories.factor_repository import FactorRepository
@@ -205,3 +206,56 @@ async def get_factor_analysis_result(
         }
     except Exception:
         raise HTTPException(status_code=403, detail="TASK_FORBIDDEN")
+
+
+@router.post("/composites/validate")
+async def validate_composite_factor(
+    spec: CompositeFactorSpec,
+    user: dict = Depends(get_current_user)
+):
+    """校验组合因子 DSL 规格并返回归一化权重"""
+    try:
+        service = CompositeFactorService()
+        weights = service.validate_spec(spec)
+        return {
+            "success": True,
+            "data": {
+                "valid": True,
+                "normalized_weights": weights
+            }
+        }
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/composites")
+async def create_composite_factor(
+    spec: CompositeFactorSpec,
+    user: dict = Depends(get_current_user)
+):
+    """创建/发布用户组合因子"""
+    try:
+        service = CompositeFactorService()
+        doc = await service.save_user_composite(user_id=user["id"], spec=spec)
+        return {
+            "success": True,
+            "data": doc
+        }
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.get("/composites/{composite_id}")
+async def get_composite_factor(
+    composite_id: str,
+    user: dict = Depends(get_current_user)
+):
+    """获取用户组合因子详情"""
+    service = CompositeFactorService()
+    doc = await service.get_user_composite(composite_id, user_id=user["id"])
+    if not doc:
+        raise HTTPException(status_code=404, detail="COMPOSITE_FACTOR_NOT_FOUND")
+    return {
+        "success": True,
+        "data": doc
+    }

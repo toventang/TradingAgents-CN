@@ -48,3 +48,22 @@ class FactorDefinition(BaseModel):
     checksum: Optional[str] = None
     created_at: datetime = Field(default_factory=now_tz)
     updated_at: datetime = Field(default_factory=now_tz)
+
+
+class AllowedTransform(str, enum.Enum):
+    ZSCORE = "zscore"
+    RANK = "rank"
+    NORMALIZE = "normalize"
+    WINSORIZE = "winsorize"
+    NEUTRALIZE = "neutralize"
+
+
+class CompositeFactorSpec(BaseModel):
+    """闭环组合因子 DSL 声明 (绝对禁止 eval/exec/动态代码)"""
+    name: str
+    description: str = ""
+    base_factors: List[str] = Field(..., min_length=1)
+    weights: Dict[str, float] = Field(default_factory=dict)
+    transforms: List[AllowedTransform] = Field(default_factory=lambda: [AllowedTransform.ZSCORE])
+    missing_policy: MissingValuePolicy = MissingValuePolicy.ZERO_FILL
+    version: str = "1.0.0"
