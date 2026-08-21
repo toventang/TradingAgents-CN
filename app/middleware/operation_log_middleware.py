@@ -12,6 +12,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 
 from app.services.operation_log_service import log_operation
 from app.models.operation_log import ActionType
+from app.core.logging_context import redact_sensitive_mapping
 
 logger = logging.getLogger("webapi")
 
@@ -140,7 +141,11 @@ class OperationLogMiddleware(BaseHTTPMiddleware):
         try:
             # 从请求状态中获取用户信息（由认证中间件设置）
             if hasattr(request.state, "user"):
-                return request.state.user
+                state_user = request.state.user
+                if isinstance(state_user, dict):
+                    return redact_sensitive_mapping(state_user)
+                if hasattr(state_user, "as_http_user"):
+                    return state_user.as_http_user()
 
             # 尝试从Authorization头解析用户信息
             auth_header = request.headers.get("authorization")
@@ -149,17 +154,9 @@ class OperationLogMiddleware(BaseHTTPMiddleware):
 
                 # 使用AuthService验证token
                 from app.services.auth_service import AuthService
-                token_data = AuthService.verify_token(token)
-
-                if token_data:
-                    # 返回用户信息（开源版只有admin用户）
-                    return {
-                        "id": "admin",
-                        "username": "admin",
-                        "name": "管理员",
-                        "is_admin": True,
-                        "roles": ["admin"]
-                    }
+                identity = await AuthService.authenticate_token(token)
+                if identity:
+                    return identity.as_http_user()
 
             return None
         except Exception as e:
@@ -252,7 +249,11 @@ class OperationLogMiddleware(BaseHTTPMiddleware):
                 "method": method,
                 "path": path,
                 "status_code": response.status_code,
-                "query_params": dict(request.query_params) if request.query_params else None,
+                "query_params": (
+                    redact_sensitive_mapping(dict(request.query_params))
+                    if request.query_params
+                    else None
+                ),
             }
 
             # 获取错误信息（如果有）
@@ -266,7 +267,7 @@ class OperationLogMiddleware(BaseHTTPMiddleware):
                 username=user_info.get("username", "unknown"),
                 action_type=action_type,
                 action=action,
-                details=details,
+                details=redact_sensitive_mapping(details),
                 success=success,
                 error_message=error_message,
                 duration_ms=duration_ms,
@@ -300,7 +301,7 @@ async def manual_log_operation(
             username=user_info.get("username", "unknown"),
             action_type=action_type,
             action=action,
-            details=details,
+            details=redact_sensitive_mapping(details),
             success=success,
             error_message=error_message,
             duration_ms=duration_ms,

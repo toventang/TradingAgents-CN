@@ -1060,13 +1060,25 @@ async def get_user_analysis_history(
 
 # WebSocket 端点
 @router.websocket("/ws/task/{task_id}")
-async def websocket_task_progress(websocket: WebSocket, task_id: str):
+async def websocket_task_progress(
+    websocket: WebSocket,
+    task_id: str,
+    token: Optional[str] = Query(default=None),
+):
     """WebSocket 端点：实时获取任务进度"""
     import json
+    from app.routers.websocket_notifications import authorize_task_websocket
+
+    identity = await authorize_task_websocket(websocket, task_id, token)
+    if identity is None:
+        return
+
     websocket_manager = get_websocket_manager()
+    connected = False
 
     try:
         await websocket_manager.connect(websocket, task_id)
+        connected = True
 
         # 发送连接确认消息
         await websocket.send_text(json.dumps({
@@ -1080,8 +1092,12 @@ async def websocket_task_progress(websocket: WebSocket, task_id: str):
             try:
                 # 接收客户端的心跳消息
                 data = await websocket.receive_text()
-                # 可以处理客户端发送的消息
-                logger.debug(f"📡 收到 WebSocket 消息: {data}")
+                logger.debug(
+                    "📡 收到 WebSocket 消息: task_id=%s user_id=%s bytes=%s",
+                    task_id,
+                    identity.user_id,
+                    len(data.encode("utf-8")),
+                )
             except WebSocketDisconnect:
                 break
             except Exception as e:
@@ -1093,7 +1109,8 @@ async def websocket_task_progress(websocket: WebSocket, task_id: str):
     except Exception as e:
         logger.error(f"❌ WebSocket 连接错误: {e}")
     finally:
-        await websocket_manager.disconnect(websocket, task_id)
+        if connected:
+            await websocket_manager.disconnect(websocket, task_id)
 
 # 任务详情查询路由（放在最后避免与 /tasks/{task_id}/status 冲突）
 @router.get("/tasks/{task_id}/details")
