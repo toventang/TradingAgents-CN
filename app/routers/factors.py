@@ -21,9 +21,16 @@ def get_task_repository() -> DomainTaskRepository:
 
 
 class ComputeFactorRequest(BaseModel):
-    symbols: List[str] = Field(..., min_items=1)
+    symbols: List[str] = Field(..., min_length=1)
     market: str = "CN"
-    factor_ids: List[str] = Field(..., min_items=1)
+    factor_ids: List[str] = Field(..., min_length=1)
+    idempotency_key: Optional[str] = None
+
+
+class FactorAnalysisRequest(BaseModel):
+    factor_id: str
+    symbols: List[str] = Field(default_factory=list)
+    periods: List[int] = Field(default_factory=lambda: [1, 5, 10, 20])
     idempotency_key: Optional[str] = None
 
 
@@ -143,3 +150,58 @@ async def get_factor_snapshot_values(
             "page_size": page_size
         }
     }
+
+
+@router.post("/analysis", status_code=status.HTTP_202_ACCEPTED)
+async def submit_factor_analysis_job(
+    payload: FactorAnalysisRequest,
+    response: Response,
+    user: dict = Depends(get_current_user),
+    task_repo: DomainTaskRepository = Depends(get_task_repository)
+):
+    """提交因子研究分析任务 (IC/Rank IC/分位数收益)"""
+    response.status_code = status.HTTP_202_ACCEPTED
+
+    task = await task_repo.create_task(
+        user_id=user["id"],
+        task_type="factor_analysis",
+        payload={
+            "factor_id": payload.factor_id,
+            "symbols": payload.symbols,
+            "periods": payload.periods
+        },
+        idempotency_key=payload.idempotency_key
+    )
+
+    return {
+        "success": True,
+        "data": {
+            "task_id": task.task_id,
+            "status": task.status.value,
+            "message": "Factor analysis job submitted successfully"
+        }
+    }
+
+
+@router.get("/analysis/{task_id}")
+async def get_factor_analysis_result(
+    task_id: str,
+    user: dict = Depends(get_current_user),
+    task_repo: DomainTaskRepository = Depends(get_task_repository)
+):
+    """获取因子研究分析结果"""
+    try:
+        task = await task_repo.get_task(task_id, user_id=user["id"])
+        if not task:
+            raise HTTPException(status_code=404, detail="TASK_NOT_FOUND")
+
+        return {
+            "success": True,
+            "data": {
+                "task_id": task.task_id,
+                "status": task.status.value,
+                "result": task.result_ref
+            }
+        }
+    except Exception:
+        raise HTTPException(status_code=403, detail="TASK_FORBIDDEN")
