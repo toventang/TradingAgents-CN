@@ -201,3 +201,55 @@ async def evaluate_signals(
 
     signals = engine.generate_signals(target_ver, user_id, as_of, df)
     return [s.model_dump() for s in signals]
+
+class RollbackRequest(BaseModel):
+    target_version_num: int
+    commit_message: Optional[str] = None
+
+
+@router.get("/{strategy_id}/diff", response_model=Dict[str, Any])
+async def diff_strategy_versions(
+    strategy_id: str,
+    v1: int = Query(...),
+    v2: int = Query(...),
+    user_id: str = Depends(AuthService.get_canonical_user_id)
+):
+    repo = StrategyRepository()
+    strat = await repo.get_strategy(strategy_id)
+    if not strat:
+        raise HTTPException(status_code=404, detail="Strategy not found")
+    if strat.user_id != user_id and not strat.is_system_template:
+        raise HTTPException(status_code=403, detail="Forbidden")
+
+    versions = await repo.list_versions(strategy_id)
+    ver1 = next((v for v in versions if v.version_num == v1), None)
+    ver2 = next((v for v in versions if v.version_num == v2), None)
+
+    if not ver1 or not ver2:
+        raise HTTPException(status_code=404, detail="One or both target versions not found")
+
+    from app.services.strategies.diff_service import StrategyDiffService
+    diff_service = StrategyDiffService(repo=repo)
+    return diff_service.diff_versions(ver1, ver2)
+
+
+@router.post("/{strategy_id}/rollback", response_model=Dict[str, Any])
+async def rollback_strategy_version(
+    strategy_id: str,
+    req: RollbackRequest,
+    user_id: str = Depends(AuthService.get_canonical_user_id)
+):
+    from app.services.strategies.diff_service import StrategyDiffService
+    diff_service = StrategyDiffService()
+    try:
+        new_ver = await diff_service.rollback_to_version(
+            strategy_id=strategy_id,
+            target_version_num=req.target_version_num,
+            user_id=user_id,
+            commit_message=req.commit_message
+        )
+        return new_ver.model_dump()
+    except StrategyForbiddenError as e:
+        raise HTTPException(status_code=403, detail=str(e))
+    except StrategyNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))

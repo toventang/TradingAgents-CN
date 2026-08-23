@@ -130,3 +130,30 @@ async def delete_backtest(
         raise HTTPException(status_code=404, detail=str(e))
     except BacktestForbiddenError as e:
         raise HTTPException(status_code=403, detail=str(e))
+
+class CompareBacktestsRequest(BaseModel):
+    backtest_ids: List[str]
+
+
+@router.post("/compare", response_model=Dict[str, Any])
+async def compare_backtests(
+    req: CompareBacktestsRequest,
+    user_id: str = Depends(AuthService.get_canonical_user_id),
+    is_admin: bool = Depends(check_is_admin)
+):
+    if not req.backtest_ids or len(req.backtest_ids) < 1:
+        raise HTTPException(status_code=400, detail="Must provide at least one backtest_id to compare")
+
+    bt_repo = BacktestRepository()
+    results = []
+
+    for bt_id in req.backtest_ids:
+        bt = await bt_repo.get_backtest(bt_id)
+        if not bt:
+            raise HTTPException(status_code=404, detail=f"Backtest {bt_id} not found")
+        if bt.user_id != user_id and not is_admin:
+            raise HTTPException(status_code=403, detail=f"Forbidden access to backtest {bt_id}")
+        results.append(bt)
+
+    from app.services.backtest.comparison import BacktestComparisonService
+    return BacktestComparisonService.compare_backtests(results)
