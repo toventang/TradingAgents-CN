@@ -17,9 +17,24 @@ const routes = [
     component: () => import('../views/Strategies/StrategyCatalog.vue')
   },
   {
+    path: '/strategies/:id/versions',
+    name: 'StrategyVersionHistory',
+    component: () => import('../views/Strategies/StrategyVersionHistory.vue')
+  },
+  {
+    path: '/strategies/:id/diff',
+    name: 'StrategyDiff',
+    component: () => import('../views/Strategies/StrategyDiff.vue')
+  },
+  {
     path: '/backtests/create',
     name: 'BacktestCreate',
     component: () => import('../views/Backtest/BacktestCreate.vue')
+  },
+  {
+    path: '/backtests/compare',
+    name: 'BacktestComparison',
+    component: () => import('../views/Backtest/BacktestComparison.vue')
   },
   {
     path: '/backtests/:id',

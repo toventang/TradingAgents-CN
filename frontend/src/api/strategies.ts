@@ -30,3 +30,16 @@ export const evaluateSignals = async (payload: any): Promise<any[]> => {
   const response = await axios.post('/api/strategies/signals/evaluate', payload);
   return response.data;
 };
+
+export const diffVersions = async (strategyId: string, v1: number, v2: number): Promise<any> => {
+  const response = await axios.get(`/api/strategies/${strategyId}/diff`, { params: { v1, v2 } });
+  return response.data;
+};
+
+export const rollbackVersion = async (strategyId: string, targetVersionNum: number, commitMessage?: string): Promise<StrategyVersion> => {
+  const response = await axios.post(`/api/strategies/${strategyId}/rollback`, {
+    target_version_num: targetVersionNum,
+    commit_message: commitMessage
+  });
+  return response.data;
+};

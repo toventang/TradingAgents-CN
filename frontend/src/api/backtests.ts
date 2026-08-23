@@ -20,3 +20,8 @@ export const getBacktestResult = async (backtestId: string): Promise<any> => {
   const response = await axios.get(`/api/backtests/${backtestId}/result`);
   return response.data;
 };
+
+export const compareBacktests = async (backtestIds: string[]): Promise<any> => {
+  const response = await axios.post('/api/backtests/compare', { backtest_ids: backtestIds });
+  return response.data;
+};
