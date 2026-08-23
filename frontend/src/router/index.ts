@@ -45,6 +45,21 @@ const routes = [
     path: '/settings/notifications',
     name: 'NotificationSettings',
     component: () => import('../views/Notifications/NotificationSettings.vue')
+  },
+  {
+    path: '/settings/risk',
+    name: 'RiskSettings',
+    component: () => import('../views/Risk/RiskSettings.vue')
+  },
+  {
+    path: '/risk/dashboard',
+    name: 'RiskDashboard',
+    component: () => import('../views/Risk/RiskDashboard.vue')
+  },
+  {
+    path: '/risk/audit-logs',
+    name: 'RiskAuditLogs',
+    component: () => import('../views/Risk/RiskAuditLogs.vue')
   }
 ];
 
