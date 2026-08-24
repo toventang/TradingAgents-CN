@@ -55,3 +55,36 @@ class CampaignValidationResult(BaseModel):
     is_valid: bool
     errors: List[str] = Field(default_factory=list)
     warnings: List[str] = Field(default_factory=list)
+
+
+class CandidateRecord(BaseModel):
+    """选股候选/排除明细记录"""
+    candidate_id: str
+    cycle_id: str
+    campaign_id: str
+    symbol: str
+    score: float
+    rank: int
+    selected: bool
+    rejection_reason: Optional[str] = None
+    target_weight: float = 0.0
+
+
+class CampaignCycleStatus(str, enum.Enum):
+    PENDING = "pending"
+    RUNNING = "running"
+    COMPLETED = "completed"
+    FAILED = "failed"
+
+
+class CampaignCycleRecord(BaseModel):
+    """Campaign 周期调仓运行记录"""
+    cycle_id: str
+    campaign_id: str
+    cycle_date: str                           # YYYY-MM-DD
+    status: CampaignCycleStatus = CampaignCycleStatus.PENDING
+    idempotency_key: str                      # campaign_id + cycle_date
+    candidates_count: int = 0
+    orders_count: int = 0
+    error_message: Optional[str] = None
+    executed_at: datetime = Field(default_factory=now_tz)
