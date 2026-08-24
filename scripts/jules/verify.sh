@@ -33,8 +33,9 @@ case "$mode" in
     ;;
   backend)
     if [[ "$#" -eq 0 ]]; then
-      echo "backend mode requires one or more explicit test paths" >&2
-      exit 2
+      python -m pytest -c tests/pytest.ini tests/unit/ -q
+    else
+      python -m pytest -c tests/pytest.ini "$@" -q
     fi
     activate_backend
     python -m pytest -c tests/pytest.ini "$@" -q
