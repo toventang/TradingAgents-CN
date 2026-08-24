@@ -88,3 +88,33 @@ class CampaignCycleRecord(BaseModel):
     orders_count: int = 0
     error_message: Optional[str] = None
     executed_at: datetime = Field(default_factory=now_tz)
+
+
+class ExitReasonCode(str, enum.Enum):
+    STOP_LOSS_TRIGGERED = "stop_loss_triggered"
+    TAKE_PROFIT_TRIGGERED = "take_profit_triggered"
+    PORTFOLIO_DRAWDOWN_PAUSE = "portfolio_drawdown_pause"
+    EMERGENCY_HALT = "emergency_halt"
+    RISK_PAUSE_USER_CONFIRMED = "risk_pause_user_confirmed"
+
+
+class CampaignRiskExitTrigger(BaseModel):
+    """风险平仓触发因素"""
+    trigger_id: str
+    campaign_id: str
+    symbol: Optional[str] = None
+    reason_code: ExitReasonCode
+    threshold_value: float
+    current_value: float
+    action_taken: str
+    detailed_message: str
+    triggered_at: datetime = Field(default_factory=now_tz)
+
+
+class CampaignRiskExitResult(BaseModel):
+    """风险检查与平仓评估结果"""
+    campaign_id: str
+    has_risk_exit: bool
+    should_pause: bool = False
+    triggers: List[CampaignRiskExitTrigger] = Field(default_factory=list)
+    exit_orders: List[Dict[str, Any]] = Field(default_factory=list)
