@@ -75,6 +75,21 @@ const routes = [
     path: '/skills/:id/test',
     name: 'SkillTest',
     component: () => import('../views/Skills/SkillTest.vue')
+  },
+  {
+    path: '/campaigns',
+    name: 'CampaignList',
+    component: () => import('../views/Campaigns/CampaignList.vue')
+  },
+  {
+    path: '/campaigns/create',
+    name: 'CampaignWizard',
+    component: () => import('../views/Campaigns/CampaignWizard.vue')
+  },
+  {
+    path: '/campaigns/:id',
+    name: 'CampaignDetail',
+    component: () => import('../views/Campaigns/CampaignDetail.vue')
   }
 ];
 
