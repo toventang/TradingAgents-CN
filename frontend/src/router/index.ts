@@ -60,6 +60,21 @@ const routes = [
     path: '/risk/audit-logs',
     name: 'RiskAuditLogs',
     component: () => import('../views/Risk/RiskAuditLogs.vue')
+  },
+  {
+    path: '/skills',
+    name: 'SkillCatalog',
+    component: () => import('../views/Skills/SkillCatalog.vue')
+  },
+  {
+    path: '/skills/create',
+    name: 'SkillEditor',
+    component: () => import('../views/Skills/SkillEditor.vue')
+  },
+  {
+    path: '/skills/:id/test',
+    name: 'SkillTest',
+    component: () => import('../views/Skills/SkillTest.vue')
   }
 ];
 
