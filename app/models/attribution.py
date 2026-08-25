@@ -84,3 +84,31 @@ class CounterfactualResult(BaseModel):
     severity: MissedUpsideSeverity
     is_legal_tradeable: bool = True           # 是否遵守合法可交易收盘价规则
     analyzed_at: datetime = Field(default_factory=now_tz)
+
+
+class ReviewConfidence(str, enum.Enum):
+    HIGH = "high"
+    MEDIUM = "medium"
+    LOW = "low"
+    INSUFFICIENT_EVIDENCE = "insufficient_evidence"
+
+
+class EvidenceGrounding(BaseModel):
+    """AI 归因复盘证据与反例基准绑定"""
+    supporting_evidence: List[str] = Field(default_factory=list)
+    counter_evidence: List[str] = Field(default_factory=list)
+    is_sufficient: bool = True
+
+
+class AITradeReview(BaseModel):
+    """AI 智能复盘报告结构"""
+    review_id: str
+    trade_id: str
+    symbol: str
+    summary: str
+    diagnosis: str
+    grounding: EvidenceGrounding
+    confidence: ReviewConfidence
+    controllability_score: float               # 0.0 - 1.0 (可控性评估)
+    suggested_improvements: List[str] = Field(default_factory=list)
+    created_at: datetime = Field(default_factory=now_tz)
