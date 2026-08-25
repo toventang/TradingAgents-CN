@@ -112,3 +112,43 @@ class AITradeReview(BaseModel):
     controllability_score: float               # 0.0 - 1.0 (可控性评估)
     suggested_improvements: List[str] = Field(default_factory=list)
     created_at: datetime = Field(default_factory=now_tz)
+
+
+class ProposalStatus(str, enum.Enum):
+    PROPOSED = "proposed"
+    PARTIALLY_APPROVED = "partially_approved"
+    APPROVED = "approved"
+    REJECTED = "rejected"
+    DRAFT_CREATED = "draft_created"
+
+
+class ProposalDiffItem(BaseModel):
+    """参数修订单项」"""
+    parameter_path: str                       # e.g. "parameters.weights.ret_1d"
+    current_value: Any
+    proposed_value: Any
+    approved: bool = True
+    reasoning: str = ""
+
+
+class LearningProposal(BaseModel):
+    """受控学习提议模型"""
+    proposal_id: str
+    campaign_id: str
+    strategy_id: str
+    status: ProposalStatus = ProposalStatus.PROPOSED
+    sample_count: int                          # 支撑该提议的复盘交易样本数
+    diff_items: List[ProposalDiffItem] = Field(default_factory=list)
+    validation_backtest_id: Optional[str] = None
+    created_new_version_num: Optional[int] = None
+    created_at: datetime = Field(default_factory=now_tz)
+    updated_at: datetime = Field(default_factory=now_tz)
+
+
+class ProposalValidationResult(BaseModel):
+    """提议验证回测对比"""
+    proposal_id: str
+    is_improved: bool
+    sharpe_delta: float
+    return_delta: float
+    max_drawdown_delta: float
