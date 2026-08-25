@@ -90,6 +90,16 @@ const routes = [
     path: '/campaigns/:id',
     name: 'CampaignDetail',
     component: () => import('../views/Campaigns/CampaignDetail.vue')
+  },
+  {
+    path: '/learning/trade-reviews/:id',
+    name: 'TradeReviewDetail',
+    component: () => import('../views/Learning/TradeReviewDetail.vue')
+  },
+  {
+    path: '/learning/proposals',
+    name: 'LearningProposals',
+    component: () => import('../views/Learning/LearningProposals.vue')
   }
 ];
 
