@@ -196,10 +196,10 @@ class ChatGoogleOpenAI(ChatGoogleGenerativeAI):
                 error_content = f"Google AI 调用失败: {error_str}\n\n请检查配置或使用其他 AI 模型"
 
             # 返回一个包含错误信息的结果，而不是抛出异常
-            from langchain_core.outputs import ChatGeneration
+            from langchain_core.outputs import ChatGeneration, ChatResult
             error_message = AIMessage(content=error_content)
             error_generation = ChatGeneration(message=error_message)
-            return LLMResult(generations=[[error_generation]])
+            return ChatResult(generations=[error_generation])
     
     def _optimize_message_content(self, message: BaseMessage):
         """优化消息内容格式，确保包含新闻特征关键词"""
