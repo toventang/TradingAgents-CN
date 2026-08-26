@@ -60,6 +60,46 @@ const routes = [
     path: '/risk/audit-logs',
     name: 'RiskAuditLogs',
     component: () => import('../views/Risk/RiskAuditLogs.vue')
+  },
+  {
+    path: '/skills',
+    name: 'SkillCatalog',
+    component: () => import('../views/Skills/SkillCatalog.vue')
+  },
+  {
+    path: '/skills/create',
+    name: 'SkillEditor',
+    component: () => import('../views/Skills/SkillEditor.vue')
+  },
+  {
+    path: '/skills/:id/test',
+    name: 'SkillTest',
+    component: () => import('../views/Skills/SkillTest.vue')
+  },
+  {
+    path: '/campaigns',
+    name: 'CampaignList',
+    component: () => import('../views/Campaigns/CampaignList.vue')
+  },
+  {
+    path: '/campaigns/create',
+    name: 'CampaignWizard',
+    component: () => import('../views/Campaigns/CampaignWizard.vue')
+  },
+  {
+    path: '/campaigns/:id',
+    name: 'CampaignDetail',
+    component: () => import('../views/Campaigns/CampaignDetail.vue')
+  },
+  {
+    path: '/learning/trade-reviews/:id',
+    name: 'TradeReviewDetail',
+    component: () => import('../views/Learning/TradeReviewDetail.vue')
+  },
+  {
+    path: '/learning/proposals',
+    name: 'LearningProposals',
+    component: () => import('../views/Learning/LearningProposals.vue')
   }
 ];
 
