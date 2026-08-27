@@ -21,3 +21,29 @@ export interface NotificationLog {
   error_message?: string;
   created_at: string;
 }
+
+// 遗留通知模型：用户通知列表项（与后端 NotificationOut 对齐）
+export type NotificationType = 'analysis' | 'alert' | 'system';
+export type NotificationStatus = 'unread' | 'read';
+
+export interface NotificationItem {
+  id: string;
+  type: NotificationType;
+  title: string;
+  content?: string;
+  link?: string;
+  source?: string;
+  status: NotificationStatus;
+  created_at: string;
+}
+
+export interface NotificationListResponse {
+  items: NotificationItem[];
+  total?: number;
+  page?: number;
+  page_size?: number;
+}
+
+export interface NotificationUnreadCountResponse {
+  count: number;
+}
