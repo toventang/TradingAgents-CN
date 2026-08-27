@@ -8,6 +8,8 @@
 .git
 .gitignore
 .gitattributes
+.github
+.codex
 
 # Python相关
 __pycache__/
