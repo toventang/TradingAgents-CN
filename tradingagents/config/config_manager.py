@@ -86,14 +86,14 @@ class ConfigManager:
         env_file = project_root / ".env"
 
         if env_file.exists():
-            # 🔧 [修复] override=False 确保环境变量优先级高于 .env 文件
-            # 这样 Docker 容器中的环境变量不会被 .env 文件中的占位符覆盖
-            logger.info(f"🔍 [ConfigManager] 加载 .env 文件: {env_file}")
-            logger.info(f"🔍 [ConfigManager] 加载前 DASHSCOPE_API_KEY: {'有值' if os.getenv('DASHSCOPE_API_KEY') else '空'}")
+            # [Fix] override=False ensures environment variables have priority over .env file
+            # This prevents .env placeholders from overriding Docker environment variables
+            logger.info(f"[ConfigManager] Loading .env file: {env_file}")
+            logger.info(f"[ConfigManager] DASHSCOPE_API_KEY before load: {'set' if os.getenv('DASHSCOPE_API_KEY') else 'empty'}")
 
             load_dotenv(env_file, override=False)
 
-            logger.info(f"🔍 [ConfigManager] 加载后 DASHSCOPE_API_KEY: {'有值' if os.getenv('DASHSCOPE_API_KEY') else '空'}")
+            logger.info(f"[ConfigManager] DASHSCOPE_API_KEY after load: {'set' if os.getenv('DASHSCOPE_API_KEY') else 'empty'}")
 
     def _get_env_api_key(self, provider: str) -> str:
         """从环境变量获取API密钥"""
@@ -111,7 +111,7 @@ class ConfigManager:
             # 对OpenAI密钥进行格式验证（始终启用）
             if provider.lower() == "openai" and api_key:
                 if not self.validate_openai_api_key_format(api_key):
-                    logger.warning(f"⚠️ OpenAI API密钥格式不正确，将被忽略: {api_key[:10]}...")
+                    logger.warning(f"[WARN] OpenAI API key format invalid, will be ignored: {api_key[:10]}...")
                     return ""
             return api_key
         return ""

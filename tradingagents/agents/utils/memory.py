@@ -38,60 +38,60 @@ class ChromaDBManager:
 
                 self._client = get_optimal_chromadb_client()
 
-                # 记录初始化信息
+                # Record initialization information
                 system = platform.system()
                 if system == "Windows":
                     if is_windows_11():
-                        logger.info(f"📚 [ChromaDB] Windows 11优化配置初始化完成 (构建号: {platform.version()})")
+                        logger.info(f"[ChromaDB] Windows 11 optimized configuration initialized (Build: {platform.version()})")
                     else:
-                        logger.info(f"📚 [ChromaDB] Windows 10兼容配置初始化完成")
+                        logger.info(f"[ChromaDB] Windows 10 compatible configuration initialized")
                 else:
-                    logger.info(f"📚 [ChromaDB] {system}标准配置初始化完成")
+                    logger.info(f"[ChromaDB] {system} standard configuration initialized")
 
                 self._initialized = True
             except Exception as e:
-                logger.error(f"❌ [ChromaDB] 初始化失败: {e}")
-                # 使用最简单的配置作为备用
+                logger.error(f"[ChromaDB] Initialization failed: {e}")
+                # Use simplest configuration as fallback
                 try:
                     settings = Settings(
                         allow_reset=True,
-                        anonymized_telemetry=False,  # 关键：禁用遥测
+                        anonymized_telemetry=False,  # Key: disable telemetry
                         is_persistent=False
                     )
                     self._client = chromadb.Client(settings)
-                    logger.info(f"📚 [ChromaDB] 使用备用配置初始化完成")
+                    logger.info(f"[ChromaDB] Using fallback configuration initialization complete")
                 except Exception as backup_error:
-                    # 最后的备用方案
+                    # Last fallback option
                     self._client = chromadb.Client()
-                    logger.warning(f"⚠️ [ChromaDB] 使用最简配置初始化: {backup_error}")
+                    logger.warning(f"[ChromaDB] Using minimal configuration: {backup_error}")
                 self._initialized = True
 
     def get_or_create_collection(self, name: str):
-        """线程安全地获取或创建集合"""
+        """Get or create collection in a thread-safe manner"""
         with self._lock:
             if name in self._collections:
-                logger.info(f"📚 [ChromaDB] 使用缓存集合: {name}")
+                logger.info(f"[ChromaDB] Using cached collection: {name}")
                 return self._collections[name]
 
             try:
-                # 尝试获取现有集合
+                # Try to get existing collection
                 collection = self._client.get_collection(name=name)
-                logger.info(f"📚 [ChromaDB] 获取现有集合: {name}")
+                logger.info(f"[ChromaDB] Retrieved existing collection: {name}")
             except Exception:
                 try:
-                    # 创建新集合
+                    # Create new collection
                     collection = self._client.create_collection(name=name)
-                    logger.info(f"📚 [ChromaDB] 创建新集合: {name}")
+                    logger.info(f"[ChromaDB] Created new collection: {name}")
                 except Exception as e:
-                    # 可能是并发创建，再次尝试获取
+                    # Might be concurrent creation, try to get again
                     try:
                         collection = self._client.get_collection(name=name)
-                        logger.info(f"📚 [ChromaDB] 并发创建后获取集合: {name}")
+                        logger.info(f"[ChromaDB] Retrieved collection after concurrent creation: {name}")
                     except Exception as final_error:
-                        logger.error(f"❌ [ChromaDB] 集合操作失败: {name}, 错误: {final_error}")
+                        logger.error(f"[ChromaDB] Collection operation failed: {name}, Error: {final_error}")
                         raise final_error
 
-            # 缓存集合
+            # Cache collection
             self._collections[name] = collection
             return collection
 
@@ -304,11 +304,16 @@ class FinancialSituationMemory:
                 )
             else:
                 self.client = "DISABLED"
-                logger.warning(f"⚠️ 未找到OPENAI_API_KEY，记忆功能已禁用")
+                logger.warning(f"[WARN] OpenAI API KEY not found, memory function disabled")
 
-        # 使用单例ChromaDB管理器
-        self.chroma_manager = ChromaDBManager()
-        self.situation_collection = self.chroma_manager.get_or_create_collection(name)
+        # Use singleton ChromaDB manager
+        try:
+            self.chroma_manager = ChromaDBManager()
+            self.situation_collection = self.chroma_manager.get_or_create_collection(name)
+        except Exception as e:
+            logger.warning(f"[WARN] ChromaDB initialization failed ({e}), memory function disabled")
+            self.chroma_manager = None
+            self.situation_collection = None
 
     def _smart_text_truncation(self, text, max_length=8192):
         """智能文本截断，保持语义完整性和缓存兼容性"""
@@ -564,6 +569,11 @@ class FinancialSituationMemory:
         ids = []
         embeddings = []
 
+        # Check if ChromaDB is available
+        if self.situation_collection is None:
+            logger.warning(f"[WARN] ChromaDB disabled, memory function not available")
+            return
+
         offset = self.situation_collection.count()
 
         for i, (situation, recommendation) in enumerate(situations_and_advice):
@@ -582,31 +592,36 @@ class FinancialSituationMemory:
     def get_memories(self, current_situation, n_matches=1):
         """Find matching recommendations using embeddings with smart truncation handling"""
         
-        # 获取当前情况的embedding
+        # Check if ChromaDB is available
+        if self.situation_collection is None:
+            logger.debug(f"[DEBUG] ChromaDB disabled, returning empty memories")
+            return []
+        
+        # Get embedding for current situation
         query_embedding = self.get_embedding(current_situation)
         
-        # 检查是否为空向量（记忆功能被禁用或出错）
+        # Check if embedding is empty vector (memory function disabled or error)
         if all(x == 0.0 for x in query_embedding):
-            logger.debug(f"⚠️ 查询embedding为空向量，返回空结果")
+            logger.debug(f"[DEBUG] Query embedding is empty vector, returning empty results")
             return []
         
-        # 检查是否有足够的数据进行查询
+        # Check if there is enough data for query
         collection_count = self.situation_collection.count()
         if collection_count == 0:
-            logger.debug(f"📭 记忆库为空，返回空结果")
+            logger.debug(f"[DEBUG] Memory library empty, returning empty results")
             return []
         
-        # 调整查询数量，不能超过集合中的文档数量
+        # Adjust query count, cannot exceed documents in collection
         actual_n_matches = min(n_matches, collection_count)
         
         try:
-            # 执行相似度查询
+            # Execute similarity query
             results = self.situation_collection.query(
                 query_embeddings=[query_embedding],
                 n_results=actual_n_matches
             )
             
-            # 处理查询结果
+            # Process query results
             memories = []
             if results and 'documents' in results and results['documents']:
                 documents = results['documents'][0]
@@ -640,15 +655,20 @@ class FinancialSituationMemory:
             return []
 
     def get_cache_info(self):
-        """获取缓存相关信息，用于调试和监控"""
+        """Get cache related information for debugging and monitoring"""
+        if self.situation_collection is None:
+            collection_count = 0
+        else:
+            collection_count = self.situation_collection.count()
+            
         info = {
-            'collection_count': self.situation_collection.count(),
+            'collection_count': collection_count,
             'client_status': 'enabled' if self.client != "DISABLED" else 'disabled',
             'embedding_model': self.embedding,
             'provider': self.llm_provider
         }
         
-        # 添加最后一次文本处理信息
+        # Add last text processing information
         if hasattr(self, '_last_text_info'):
             info['last_text_processing'] = self._last_text_info
             
