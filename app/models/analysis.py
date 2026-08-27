@@ -1,17 +1,79 @@
 """
 分析相关数据模型
+
+包含两类模型：
+1. 版本化 AnalysisProfile 模型（新架构）
+2. 遗留分析任务/批次模型（兼容现有 services 与 routers）
 """
 
+import enum
 from datetime import datetime
 from typing import Optional, List, Dict, Any
 from pydantic import BaseModel, Field, ConfigDict, field_serializer
-from enum import Enum
-from bson import ObjectId
-from .user import PyObjectId
+from app.models.user import PyObjectId
 from app.utils.timezone import now_tz
 
 
-class AnalysisStatus(str, Enum):
+# ============================================================
+# 新架构：版本化 AnalysisProfile 模型
+# ============================================================
+
+
+class AnalysisDepth(str, enum.Enum):
+    QUICK = "quick"
+    STANDARD = "standard"
+    DEEP = "deep"
+
+
+class RiskPreference(str, enum.Enum):
+    CONSERVATIVE = "conservative"
+    BALANCED = "balanced"
+    AGGRESSIVE = "aggressive"
+
+
+class InvestmentHorizon(str, enum.Enum):
+    SHORT_TERM = "short_term"
+    MEDIUM_TERM = "medium_term"
+    LONG_TERM = "long_term"
+
+
+class AnalysisProfileVersion(BaseModel):
+    """不可变的分析 Profile 版本模型"""
+    version_id: str
+    profile_id: str
+    version_num: int = 1
+    analysts: List[str] = Field(default_factory=lambda: ["market_analyst", "fundamentals_analyst", "technical_analyst", "risk_analyst"])
+    depth: AnalysisDepth = AnalysisDepth.STANDARD
+    model_refs: Dict[str, str] = Field(default_factory=dict)  # provider/model name, NO secrets
+    risk_preference: RiskPreference = RiskPreference.BALANCED
+    horizon: InvestmentHorizon = InvestmentHorizon.MEDIUM_TERM
+    future_skill_refs: List[str] = Field(default_factory=list)
+    factor_context_limits: int = 20
+    strategy_context: Optional[Dict[str, Any]] = None
+    debate_limits: Dict[str, int] = Field(default_factory=lambda: {"max_rounds": 3, "max_tokens": 4096})
+    output_schema_version: str = "v1"
+    is_published: bool = True
+    created_at: datetime = Field(default_factory=now_tz)
+
+
+class AnalysisProfile(BaseModel):
+    """分析 Profile 主体模型"""
+    profile_id: str
+    user_id: str
+    name: str
+    description: str = ""
+    is_system_template: bool = False
+    latest_version_num: int = 1
+    created_at: datetime = Field(default_factory=now_tz)
+    updated_at: datetime = Field(default_factory=now_tz)
+
+
+# ============================================================
+# 遗留模型：分析任务/批次（保留以兼容现有 services 与 routers）
+# ============================================================
+
+
+class AnalysisStatus(str, enum.Enum):
     """分析状态枚举"""
     PENDING = "pending"
     PROCESSING = "processing"
@@ -20,7 +82,7 @@ class AnalysisStatus(str, Enum):
     CANCELLED = "cancelled"
 
 
-class BatchStatus(str, Enum):
+class BatchStatus(str, enum.Enum):
     """批次状态枚举"""
     PENDING = "pending"
     PROCESSING = "processing"
@@ -86,17 +148,17 @@ class AnalysisTask(BaseModel):
     created_at: datetime = Field(default_factory=now_tz)
     started_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
-    
+
     # 执行信息
     worker_id: Optional[str] = None
     parameters: AnalysisParameters = Field(default_factory=AnalysisParameters)
     result: Optional[AnalysisResult] = None
-    
+
     # 重试机制
     retry_count: int = 0
     max_retries: int = 3
     last_error: Optional[str] = None
-    
+
     model_config = ConfigDict(
         populate_by_name=True,
         arbitrary_types_allowed=True
@@ -111,25 +173,25 @@ class AnalysisBatch(BaseModel):
     title: str = Field(..., description="批次标题")
     description: Optional[str] = None
     status: BatchStatus = BatchStatus.PENDING
-    
+
     # 任务统计
     total_tasks: int = 0
     completed_tasks: int = 0
     failed_tasks: int = 0
     cancelled_tasks: int = 0
     progress: int = Field(default=0, ge=0, le=100, description="整体进度 0-100")
-    
+
     # 时间戳
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=now_tz)
     started_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
-    
+
     # 配置参数
     parameters: AnalysisParameters = Field(default_factory=AnalysisParameters)
-    
+
     # 结果摘要
     results_summary: Optional[Dict[str, Any]] = None
-    
+
     model_config = ConfigDict(
         populate_by_name=True,
         arbitrary_types_allowed=True

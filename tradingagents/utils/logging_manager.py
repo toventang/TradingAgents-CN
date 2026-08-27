@@ -125,8 +125,8 @@ class TradingAgentsLogger:
             'loggers': {
                 'tradingagents': {'level': log_level},
                 'web': {'level': log_level},
-                'streamlit': {'level': 'WARNING'},  # Streamlit日志较多，设为WARNING
-                'urllib3': {'level': 'WARNING'},    # HTTP请求日志较多
+                'streamlit': {'level': 'WARNING'},  # Streamlit generates many logs, set to WARNING
+                'urllib3': {'level': 'WARNING'},    # HTTP request logs are verbose
                 'requests': {'level': 'WARNING'},
                 'matplotlib': {'level': 'WARNING'}
             },
@@ -151,10 +151,10 @@ class TradingAgentsLogger:
                     with open(config_path, 'r', encoding='utf-8') as f:
                         config_data = toml.load(f)
 
-                    # 转换配置格式
+                    # Convert configuration format
                     return self._convert_toml_config(config_data)
                 except Exception as e:
-                    _bootstrap_logger.warning(f"警告: 无法加载配置文件 {config_path}: {e}")
+                    _bootstrap_logger.warning(f"Warning: Cannot load configuration file {config_path}: {e}")
                     continue
 
         return None
@@ -202,7 +202,7 @@ class TradingAgentsLogger:
 
         if not self.config['docker']['enabled'] or not self.config['docker']['stdout_only']:
             self._add_file_handler(root_logger)
-            self._add_error_handler(root_logger)  # 🔧 添加错误日志处理器
+            self._add_error_handler(root_logger)  # Add error log handler
             if self.config['handlers']['structured']['enabled']:
                 self._add_structured_handler(root_logger)
         
@@ -210,15 +210,19 @@ class TradingAgentsLogger:
         self._configure_specific_loggers()
     
     def _add_console_handler(self, logger: logging.Logger):
-        """添加控制台处理器"""
+        """Add console handler"""
         if not self.config['handlers']['console']['enabled']:
             return
             
         console_handler = logging.StreamHandler(sys.stdout)
+        # Set UTF-8 encoding for console handler to support Unicode characters
+        if hasattr(console_handler, 'setEncoding'):
+            console_handler.setEncoding('utf-8')
+        
         console_level = getattr(logging, self.config['handlers']['console']['level'])
         console_handler.setLevel(console_level)
         
-        # 选择格式化器
+        # Choose formatter
         if self.config['handlers']['console']['colored'] and sys.stdout.isatty():
             formatter = ColoredFormatter(self.config['format']['console'])
         else:
@@ -274,7 +278,7 @@ class TradingAgentsLogger:
             encoding='utf-8'
         )
 
-        # 🔧 只记录WARNING及以上级别（WARNING, ERROR, CRITICAL）
+        # Only record WARNING and above level (WARNING, ERROR, CRITICAL)
         error_level = getattr(logging, error_config.get('level', 'WARNING'))
         error_handler.setLevel(error_level)
 
