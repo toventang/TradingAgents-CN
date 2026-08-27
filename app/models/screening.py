@@ -2,7 +2,7 @@
 股票筛选相关的数据模型
 """
 
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import BaseModel, Field
 from typing import Any, Dict, List, Optional, Union
 from enum import Enum
 
@@ -37,7 +37,8 @@ class ScreeningCondition(BaseModel):
     value: Union[float, int, str, List[Union[float, int, str]]] = Field(..., description="筛选值")
     field_type: Optional[FieldType] = Field(None, description="字段类型")
     
-    model_config = ConfigDict(use_enum_values=True)
+    class Config:
+        use_enum_values = True
 
 
 class ScreeningRequest(BaseModel):

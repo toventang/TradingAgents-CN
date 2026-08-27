@@ -64,15 +64,10 @@ class BacktestExecutionEngine:
                 day_prices_map = day_prices["close"].to_dict() if "close" in day_prices.columns else {}
 
             # 获取当天的因子数据 snapshot
-            day_factors = pd.DataFrame()
-            if daily_factors_df is not None and not daily_factors_df.empty:
-                try:
-                    day_factors = daily_factors_df.loc[trade_date]
-                    # 确保返回 DataFrame，即使只有一行数据
-                    if isinstance(day_factors, pd.Series):
-                        day_factors = day_factors.to_frame().T
-                except (KeyError, TypeError):
-                    day_factors = pd.DataFrame()
+            try:
+                day_factors = daily_factors_df.loc[trade_date] if daily_factors_df is not None and not daily_factors_df.empty else pd.DataFrame()
+            except KeyError:
+                day_factors = pd.DataFrame()
 
             # 1. 信号计算与调仓 (Rebalance)
             as_of_dt = datetime.strptime(str(trade_date)[:10], "%Y-%m-%d")

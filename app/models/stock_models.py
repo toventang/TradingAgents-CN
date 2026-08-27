@@ -4,7 +4,7 @@
 """
 from datetime import datetime, date
 from typing import Optional, Dict, Any, List, Literal
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import BaseModel, Field
 from bson import ObjectId
 
 
@@ -116,9 +116,11 @@ class StockBasicInfoExtended(BaseModel):
     # 版本控制
     data_version: Optional[int] = Field(None, description="数据版本")
     
-    model_config = ConfigDict(
-        extra="allow",
-        json_schema_extra={
+    class Config:
+        # 允许额外字段，保持向后兼容
+        extra = "allow"
+        # 示例数据
+        json_schema_extra = {
             "example": {
                 # 标准化字段
                 "symbol": "000001",
@@ -146,7 +148,6 @@ class StockBasicInfoExtended(BaseModel):
                 "data_version": 1
             }
         }
-    )
 
 
 class MarketQuotesExtended(BaseModel):
@@ -193,9 +194,9 @@ class MarketQuotesExtended(BaseModel):
     data_source: Optional[str] = Field(None, description="数据来源")
     data_version: Optional[int] = Field(None, description="数据版本")
     
-    model_config = ConfigDict(
-        extra="allow",
-        json_schema_extra={
+    class Config:
+        extra = "allow"
+        json_schema_extra = {
             "example": {
                 # 标准化字段
                 "symbol": "000001",
@@ -217,7 +218,6 @@ class MarketQuotesExtended(BaseModel):
                 "volume": 125000000
             }
         }
-    )
 
 
 # 数据库操作相关的响应模型
