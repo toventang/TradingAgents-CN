@@ -6,14 +6,20 @@ from tradingagents.utils.logging_manager import get_logger
 logger = get_logger('default')
 
 
+import os
+
 # Create a custom config
 config = DEFAULT_CONFIG.copy()
 config["llm_provider"] = "google"  # Use a different model
 config["backend_url"] = "https://generativelanguage.googleapis.com/v1beta"  # Use a different backend
 config["deep_think_llm"] = "gemini-2.0-flash"  # Use a different model
-config["quick_think_llm"] = "gemini-2.0-flash"  # Use a different model
+config["quick_think_llm"] = "quick-gemini-2.0-flash" if "quick-gemini-2.0-flash" in DEFAULT_CONFIG else "gemini-2.0-flash"  # Use a different model
 config["max_debate_rounds"] = 1  # Increase debate rounds
 config["online_tools"] = True  # Increase debate rounds
+
+if not os.getenv("GOOGLE_API_KEY"):
+    config["quick_api_key"] = "mock_google_api_key"
+    config["deep_api_key"] = "mock_google_api_key"
 
 # Initialize with custom config
 ta = TradingAgentsGraph(debug=True, config=config)
