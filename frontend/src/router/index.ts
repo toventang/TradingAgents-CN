@@ -95,6 +95,57 @@ const routes = [
     path: '/learning/trade-reviews/:id',
     name: 'TradeReviewDetail',
     component: () => import('../views/Learning/TradeReviewDetail.vue')
+    path: '/factors',
+    name: 'Factors',
+    component: () => import('@/layouts/BasicLayout.vue'),
+    meta: {
+      title: '因子平台',
+      icon: 'DataAnalysis',
+      requiresAuth: true,
+      transition: 'slide-up'
+    },
+    children: [
+      {
+        path: '',
+        name: 'FactorCatalog',
+        component: () => import('@/views/Factors/FactorCatalog.vue'),
+        meta: { title: '因子目录', requiresAuth: true }
+      },
+      {
+        path: 'compute',
+        name: 'FactorCompute',
+        component: () => import('@/views/Factors/FactorCompute.vue'),
+        meta: { title: '因子计算', requiresAuth: true }
+      },
+      {
+        path: 'snapshots/:id',
+        name: 'FactorSnapshotDetail',
+        component: () => import('@/views/Factors/FactorSnapshotDetail.vue'),
+        meta: { title: '快照详情', requiresAuth: true, hideInMenu: true }
+      }
+    ]
+  },
+  {
+    path: '/paper',
+    name: 'PaperTrading',
+    component: () => import('@/layouts/BasicLayout.vue'),
+    meta: {
+      title: '模拟交易',
+      icon: 'CreditCard',
+      requiresAuth: true,
+      transition: 'slide-up'
+    },
+    children: [
+      {
+        path: '',
+        name: 'PaperTradingHome',
+        component: () => import('@/views/PaperTrading/index.vue'),
+        meta: {
+          title: '模拟交易',
+          requiresAuth: true
+        }
+      }
+    ]
   },
   {
     path: '/learning/proposals',
