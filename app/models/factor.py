@@ -4,11 +4,22 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
+import os
 import re
+from datetime import date, datetime, timezone
 from enum import Enum
 from typing import Any
+from uuid import uuid4
 
-from pydantic import BaseModel, ConfigDict, Field, StrictInt, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    StrictInt,
+    field_validator,
+    model_validator,
+)
 
 from app.models.symbol import Market
 
@@ -125,6 +136,10 @@ class ParameterSpec(BaseModel):
         else:
             valid = isinstance(value, dict)
         if not valid:
+            return False
+        if self.type in {ParameterType.INTEGER, ParameterType.NUMBER} and not math.isfinite(
+            float(value)
+        ):
             return False
         if self.minimum is not None and value < self.minimum:
             return False
@@ -265,6 +280,240 @@ class FactorDefinition(FactorSpec):
     def content_checksum(self) -> str:
         payload = self.model_dump(mode="json", exclude={"checksum"})
         return hashlib.sha256(_stable_json(payload).encode("utf-8")).hexdigest()
+
+
+class FactorJobStatus(str, Enum):
+    QUEUED = "queued"
+    RUNNING = "running"
+    SUCCEEDED = "succeeded"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
+
+
+class FactorSnapshotStatus(str, Enum):
+    BUILDING = "building"
+    READY = "ready"
+    FAILED = "failed"
+    SUPERSEDED = "superseded"
+
+
+class FactorVersionRef(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    factor_id: str = Field(pattern=r"^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$")
+    version: StrictInt = Field(default=1, ge=1)
+    params: dict[str, Any] = Field(default_factory=dict)
+
+
+class FactorUniverseMember(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    market: Market
+    symbol: str = Field(min_length=1, max_length=64)
+
+    @field_validator("symbol")
+    @classmethod
+    def require_canonical_symbol(cls, value: str) -> str:
+        if not value.strip() or value != value.strip():
+            raise ValueError("symbol must be non-blank and trimmed")
+        return value
+
+
+def _default_factor_workers() -> int:
+    return min(max((os.cpu_count() or 2) - 1, 1), 8)
+
+
+class FactorComputeRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    universe_snapshot_id: str = Field(min_length=1, max_length=200)
+    members: tuple[FactorUniverseMember, ...] = Field(min_length=1)
+    trade_date: date
+    as_of: datetime
+    factors: tuple[FactorVersionRef, ...] = Field(min_length=1)
+    source_versions: dict[str, str] = Field(min_length=1)
+    adjustment: str = Field(default="qfq", pattern=r"^(qfq|hfq|none)$")
+    chunk_size: StrictInt = Field(default=100, ge=1, le=1000)
+    workers: StrictInt = Field(default_factory=_default_factor_workers, ge=1, le=16)
+
+    @field_validator("as_of")
+    @classmethod
+    def require_aware_as_of(cls, value: datetime) -> datetime:
+        if value.tzinfo is None or value.utcoffset() is None:
+            raise ValueError("as_of must be timezone-aware")
+        return value.astimezone(timezone.utc)
+
+    @field_validator("universe_snapshot_id")
+    @classmethod
+    def non_whitespace_universe(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("universe_snapshot_id cannot be blank")
+        return value
+
+    @model_validator(mode="after")
+    def validate_request_identity(self) -> "FactorComputeRequest":
+        member_keys = [(item.market, item.symbol) for item in self.members]
+        if len(set(member_keys)) != len(member_keys):
+            raise ValueError("universe members must be unique")
+        markets = {item.market for item in self.members}
+        if len(markets) != 1:
+            raise ValueError("one factor snapshot must contain exactly one market")
+        factor_keys = [(item.factor_id, item.version) for item in self.factors]
+        if len(set(factor_keys)) != len(factor_keys):
+            raise ValueError("requested factor versions must be unique")
+        if self.trade_date > self.as_of.date():
+            raise ValueError("trade_date cannot be after as_of")
+        if any(not key.strip() or not value.strip() for key, value in self.source_versions.items()):
+            raise ValueError("source_versions keys and values cannot be blank")
+        return self
+
+    @property
+    def market(self) -> Market:
+        return self.members[0].market
+
+    def semantic_payload(self) -> dict[str, Any]:
+        payload = self.model_dump(mode="json", exclude={"chunk_size", "workers"})
+        payload["members"] = sorted(
+            payload["members"], key=lambda item: (item["market"], item["symbol"])
+        )
+        payload["factors"] = sorted(
+            payload["factors"], key=lambda item: (item["factor_id"], item["version"])
+        )
+        payload["source_versions"] = dict(sorted(payload["source_versions"].items()))
+        return payload
+
+    @property
+    def request_checksum(self) -> str:
+        return hashlib.sha256(
+            _stable_json(self.semantic_payload()).encode("utf-8")
+        ).hexdigest()
+
+    @property
+    def factor_set_checksum(self) -> str:
+        factors = [item.model_dump(mode="json") for item in self.factors]
+        factors.sort(key=lambda item: (item["factor_id"], item["version"]))
+        return hashlib.sha256(_stable_json(factors).encode("utf-8")).hexdigest()
+
+
+class FactorJob(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    job_id: str = Field(default_factory=lambda: str(uuid4()), min_length=1)
+    user_id: str = Field(min_length=1)
+    task_id: str = Field(min_length=1)
+    request_checksum: str = Field(pattern=r"^[0-9a-f]{64}$")
+    status: FactorJobStatus = FactorJobStatus.QUEUED
+    request: FactorComputeRequest
+    snapshot_id: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    completed_symbols: int = Field(default=0, ge=0)
+    total_symbols: int = Field(ge=1)
+    error: dict[str, Any] | None = None
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+    @field_validator("created_at", "updated_at")
+    @classmethod
+    def normalize_timestamps(cls, value: datetime) -> datetime:
+        if value.tzinfo is None or value.utcoffset() is None:
+            raise ValueError("job timestamps must be timezone-aware")
+        return value.astimezone(timezone.utc)
+
+    @model_validator(mode="after")
+    def validate_progress_identity(self) -> "FactorJob":
+        if self.completed_symbols > self.total_symbols:
+            raise ValueError("completed_symbols cannot exceed total_symbols")
+        if self.total_symbols != len(self.request.members):
+            raise ValueError("total_symbols must match the fixed universe")
+        if self.request_checksum != self.request.request_checksum:
+            raise ValueError("job request checksum does not match request content")
+        if self.status == FactorJobStatus.SUCCEEDED and (
+            self.snapshot_id is None or self.completed_symbols != self.total_symbols
+        ):
+            raise ValueError("succeeded jobs require a snapshot and complete progress")
+        if self.status in {FactorJobStatus.FAILED, FactorJobStatus.CANCELLED} and not self.error:
+            raise ValueError("failed and cancelled jobs require an error summary")
+        return self
+
+
+class FactorSnapshot(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    snapshot_id: str = Field(pattern=r"^[0-9a-f]{64}$")
+    user_id: str = Field(min_length=1)
+    job_id: str = Field(min_length=1)
+    task_id: str = Field(min_length=1)
+    market: Market
+    trade_date: date
+    as_of: datetime
+    universe_snapshot_id: str = Field(min_length=1)
+    factor_set_checksum: str = Field(pattern=r"^[0-9a-f]{64}$")
+    request_checksum: str = Field(pattern=r"^[0-9a-f]{64}$")
+    status: FactorSnapshotStatus = FactorSnapshotStatus.BUILDING
+    expected_row_count: int = Field(ge=1)
+    expected_factor_count: int = Field(ge=1)
+    row_count: int = Field(default=0, ge=0)
+    factor_count: int = Field(default=0, ge=0)
+    source_versions: dict[str, str]
+    values_checksum: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    error: dict[str, Any] | None = None
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    published_at: datetime | None = None
+
+    @field_validator("as_of", "created_at", "updated_at", "published_at")
+    @classmethod
+    def normalize_timestamps(cls, value: datetime | None) -> datetime | None:
+        if value is None:
+            return None
+        if value.tzinfo is None or value.utcoffset() is None:
+            raise ValueError("snapshot timestamps must be timezone-aware")
+        return value.astimezone(timezone.utc)
+
+    @model_validator(mode="after")
+    def validate_publication_state(self) -> "FactorSnapshot":
+        if self.row_count > self.expected_row_count:
+            raise ValueError("snapshot row_count exceeds its fixed universe")
+        if self.factor_count > self.expected_factor_count:
+            raise ValueError("snapshot factor_count exceeds its requested factor set")
+        if self.status in {FactorSnapshotStatus.READY, FactorSnapshotStatus.SUPERSEDED}:
+            if (
+                self.row_count != self.expected_row_count
+                or self.factor_count != self.expected_factor_count
+                or self.values_checksum is None
+                or self.published_at is None
+            ):
+                raise ValueError("published snapshots require complete counts and checksum")
+        if self.status == FactorSnapshotStatus.FAILED and not self.error:
+            raise ValueError("failed snapshots require an error summary")
+        return self
+
+
+class FactorValueRow(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    snapshot_id: str = Field(pattern=r"^[0-9a-f]{64}$")
+    market: Market
+    symbol: str = Field(min_length=1)
+    trade_date: date
+    values: dict[str, float | None]
+    quality: dict[str, str | None]
+
+    @field_validator("values", mode="before")
+    @classmethod
+    def require_finite_json_values(
+        cls, values: dict[str, float | None]
+    ) -> dict[str, float | None]:
+        if not isinstance(values, dict):
+            raise ValueError("factor values must be an object")
+        for factor_id, value in values.items():
+            if not factor_id or (
+                value is not None
+                and (isinstance(value, bool) or not isinstance(value, (int, float)))
+            ):
+                raise ValueError("factor values must be numeric or null")
+            if value is not None and not float("-inf") < float(value) < float("inf"):
+                raise ValueError("factor values must be finite or null")
+        return values
 
 
 def _stable_json(value: Any) -> str:
