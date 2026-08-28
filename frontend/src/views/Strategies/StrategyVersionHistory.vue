@@ -1,61 +1,192 @@
 <template>
-  <div class="strategy-version-history p-6 max-w-4xl mx-auto">
-    <h1 class="text-2xl font-bold mb-6">策略版本历史与回退</h1>
+  <div class="strategy-version-history">
+    <!-- 页面头部 -->
+    <div class="page-header">
+      <h1 class="page-title">
+        <el-icon><Timer /></el-icon>
+        策略版本历史与回退
+      </h1>
+      <p class="page-description">
+        查看策略所有版本并安全回退至任意历史版本
+      </p>
+    </div>
 
-    <div v-if="versions.length" class="space-y-4">
-      <div v-for="ver in versions" :key="ver.version_id" class="bg-white p-4 border rounded shadow flex justify-between items-center">
-        <div>
-          <div class="flex items-center gap-2">
-            <span class="font-bold text-lg">v{{ ver.version_num }}</span>
-            <span v-if="ver.is_published" class="px-2 py-0.5 text-xs bg-green-100 text-green-800 rounded">已发布</span>
-            <span v-else class="px-2 py-0.5 text-xs bg-yellow-100 text-yellow-800 rounded">草稿</span>
-          </div>
-          <p class="text-gray-600 text-sm mt-1">{{ ver.commit_message || '无提交日志' }}</p>
-          <p class="text-gray-400 text-xs mt-1">创建时间: {{ ver.created_at }}</p>
+    <el-card class="history-card" shadow="never" v-loading="loading">
+      <template #header>
+        <div class="card-header">
+          <h3>版本时间线</h3>
+          <el-button type="primary" size="small" :icon="Refresh" @click="loadData">刷新</el-button>
         </div>
+      </template>
 
-        <div class="flex gap-2">
-          <button @click="onRollback(ver.version_num)" class="px-3 py-1 bg-amber-600 text-white text-xs rounded hover:bg-amber-700">
-            回退至此版本
-          </button>
+      <el-empty v-if="!loading && versions.length === 0" description="暂无版本历史" />
+
+      <div v-else class="version-list">
+        <div v-for="ver in versions" :key="ver.version_id" class="version-item">
+          <div class="version-info">
+            <div class="version-head">
+              <span class="version-num">v{{ ver.version_num }}</span>
+              <el-tag v-if="ver.is_published" type="success" size="small">已发布</el-tag>
+              <el-tag v-else type="warning" size="small" effect="plain">草稿</el-tag>
+            </div>
+            <p class="version-message">{{ ver.commit_message || '无提交日志' }}</p>
+            <p class="version-time">创建时间: {{ ver.created_at }}</p>
+          </div>
+          <div class="version-actions">
+            <el-button
+              type="warning"
+              size="small"
+              :icon="RefreshLeft"
+              @click="onRollback(ver.version_num)"
+            >
+              回退至此版本
+            </el-button>
+          </div>
         </div>
       </div>
-    </div>
+    </el-card>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue';
-import { useRoute, useRouter } from 'vue-router';
-import { getStrategy, rollbackVersion } from '../../api/strategies';
-import { StrategyVersion } from '../../types/strategy';
+import { ref, onMounted } from 'vue'
+import { useRoute } from 'vue-router'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import { Timer, Refresh, RefreshLeft } from '@element-plus/icons-vue'
+import { getStrategy, rollbackVersion } from '../../api/strategies'
+import type { StrategyVersion } from '../../types/strategy'
 
-const route = useRoute();
-const router = useRouter();
-const versions = ref<StrategyVersion[]>([]);
-const strategyId = route.params.id as string;
+const route = useRoute()
+const versions = ref<StrategyVersion[]>([])
+const loading = ref(false)
+const strategyId = route.params.id as string
 
 const loadData = async () => {
+  loading.value = true
   try {
-    const res = await getStrategy(strategyId);
-    versions.value = res.versions;
+    const res = await getStrategy(strategyId)
+    versions.value = res.versions
   } catch (err) {
-    console.error('Failed to load version history:', err);
+    console.error('Failed to load version history:', err)
+    ElMessage.error('加载版本历史失败')
+  } finally {
+    loading.value = false
   }
-};
+}
 
 const onRollback = async (verNum: number) => {
-  if (!confirm(`确定要安全回退至版本 v${verNum} 吗？`)) return;
   try {
-    await rollbackVersion(strategyId, verNum, `Rollback to v${verNum}`);
-    alert(`成功回退至版本 v${verNum}！`);
-    await loadData();
-  } catch (err) {
-    console.error('Failed to rollback version:', err);
+    await ElMessageBox.confirm(
+      `确定要安全回退至版本 v${verNum} 吗？`,
+      '版本回退确认',
+      {
+        confirmButtonText: '确认回退',
+        cancelButtonText: '取消',
+        type: 'warning'
+      }
+    )
+  } catch {
+    return
   }
-};
+
+  try {
+    await rollbackVersion(strategyId, verNum, `Rollback to v${verNum}`)
+    ElMessage.success(`成功回退至版本 v${verNum}`)
+    await loadData()
+  } catch (err) {
+    console.error('Failed to rollback version:', err)
+    ElMessage.error('版本回退失败')
+  }
+}
 
 onMounted(() => {
-  loadData();
-});
+  loadData()
+})
 </script>
+
+<style lang="scss" scoped>
+.strategy-version-history {
+  .page-header {
+    margin-bottom: 24px;
+
+    .page-title {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 24px;
+      font-weight: 600;
+      color: var(--el-text-color-primary);
+      margin: 0 0 8px 0;
+    }
+
+    .page-description {
+      color: var(--el-text-color-regular);
+      margin: 0;
+    }
+  }
+
+  .history-card {
+    .card-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+
+      h3 {
+        margin: 0;
+        font-size: 16px;
+        font-weight: 600;
+      }
+    }
+
+    .version-list {
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+
+    .version-item {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 16px;
+      padding: 16px;
+      background: var(--el-fill-color-light);
+      border-radius: 6px;
+      border: 1px solid var(--el-border-color-lighter);
+
+      .version-info {
+        flex: 1;
+      }
+
+      .version-head {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-bottom: 6px;
+
+        .version-num {
+          font-size: 16px;
+          font-weight: 700;
+          color: var(--el-text-color-primary);
+        }
+      }
+
+      .version-message {
+        margin: 0 0 4px 0;
+        font-size: 14px;
+        color: var(--el-text-color-regular);
+      }
+
+      .version-time {
+        margin: 0;
+        font-size: 12px;
+        color: var(--el-text-color-placeholder);
+      }
+
+      .version-actions {
+        flex-shrink: 0;
+      }
+    }
+  }
+}
+</style>

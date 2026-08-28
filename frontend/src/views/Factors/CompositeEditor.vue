@@ -1,19 +1,35 @@
 <template>
-  <div class="composite-editor-container">
-    <el-card class="box-card">
+  <div class="composite-editor">
+    <!-- 页面头部 -->
+    <div class="page-header">
+      <h1 class="page-title">
+        <el-icon><Cpu /></el-icon>
+        可视化组合因子构建器
+      </h1>
+      <p class="page-description">
+        结构化 Form 模式：选择基础因子、变换方式与权重并发布组合因子
+      </p>
+    </div>
+
+    <el-card class="editor-card" shadow="never">
       <template #header>
         <div class="card-header">
-          <span>可视化组合因子构建器 (结构化 Form 模式)</span>
+          <h3>组合因子配置</h3>
         </div>
       </template>
 
-      <el-form :model="form" label-width="120px">
+      <el-form :model="form" label-width="140px">
         <el-form-item label="组合因子名称">
-          <el-input v-model="form.name" placeholder="请输入组合因子名称 (如 Value_Momentum_Mix)" style="width: 400px;" />
+          <el-input v-model="form.name" placeholder="如：Value_Momentum_Mix" />
         </el-form-item>
 
         <el-form-item label="描述">
-          <el-input v-model="form.description" placeholder="请输入组合因子描述" type="textarea" :rows="2" style="width: 500px;" />
+          <el-input
+            v-model="form.description"
+            type="textarea"
+            :rows="2"
+            placeholder="请输入组合因子描述"
+          />
         </el-form-item>
 
         <el-form-item label="基础因子选择">
@@ -37,23 +53,25 @@
         </el-form-item>
 
         <!-- 因子权重设置 -->
-        <div v-if="form.base_factors.length > 0" style="margin-top: 20px; margin-bottom: 20px;">
-          <h4>因子权重配置</h4>
-          <div v-for="bf in form.base_factors" :key="bf" style="display: flex; align-items: center; margin-bottom: 10px;">
-            <span style="width: 150px;">{{ bf }}:</span>
-            <el-slider v-model="weightsMap[bf]" :min="0" :max="100" style="width: 300px; margin-right: 15px;" />
-            <span>{{ weightsMap[bf] }}%</span>
+        <div v-if="form.base_factors.length > 0" class="weights-section">
+          <h4 class="section-title">因子权重配置</h4>
+          <div v-for="bf in form.base_factors" :key="bf" class="weight-item">
+            <span class="weight-label">{{ bf }}</span>
+            <el-slider v-model="weightsMap[bf]" :min="0" :max="100" class="weight-slider" />
+            <span class="weight-value">{{ weightsMap[bf] }}%</span>
           </div>
         </div>
 
         <el-form-item>
-          <el-button type="info" @click="handleValidate">校验组合配置</el-button>
-          <el-button type="primary" :loading="saving" @click="handleSave">发布组合因子</el-button>
+          <el-button type="info" :icon="Check" @click="handleValidate">校验组合配置</el-button>
+          <el-button type="primary" :loading="saving" :icon="Position" @click="handleSave">
+            发布组合因子
+          </el-button>
         </el-form-item>
       </el-form>
 
       <!-- 校验结果提示 -->
-      <div v-if="validationInfo" style="margin-top: 20px;">
+      <div v-if="validationInfo" class="validation-box">
         <el-alert title="组合因子 DSL 校验通过" type="success" :description="validationInfo" show-icon />
       </div>
     </el-card>
@@ -63,6 +81,7 @@
 <script setup lang="ts">
 import { ref, reactive } from "vue"
 import { ElMessage } from "element-plus"
+import { Cpu, Check, Position } from "@element-plus/icons-vue"
 import factorsApi from "@/api/factors"
 
 const saving = ref(false)
@@ -115,8 +134,79 @@ const handleSave = async () => {
 }
 </script>
 
-<style scoped>
-.composite-editor-container {
-  padding: 20px;
+<style lang="scss" scoped>
+.composite-editor {
+  .page-header {
+    margin-bottom: 24px;
+
+    .page-title {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 24px;
+      font-weight: 600;
+      color: var(--el-text-color-primary);
+      margin: 0 0 8px 0;
+    }
+
+    .page-description {
+      color: var(--el-text-color-regular);
+      margin: 0;
+    }
+  }
+
+  .editor-card {
+    .card-header h3 {
+      margin: 0;
+      font-size: 16px;
+      font-weight: 600;
+    }
+  }
+
+  .weights-section {
+    margin: 20px 0;
+    padding: 16px;
+    background: var(--el-fill-color-light);
+    border-radius: 6px;
+    border: 1px solid var(--el-border-color-lighter);
+
+    .section-title {
+      margin: 0 0 16px 0;
+      font-size: 16px;
+      font-weight: 600;
+      color: var(--el-text-color-primary);
+    }
+
+    .weight-item {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      margin-bottom: 12px;
+
+      .weight-label {
+        width: 160px;
+        flex-shrink: 0;
+        font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+        font-size: 13px;
+        color: var(--el-text-color-regular);
+      }
+
+      .weight-slider {
+        flex: 1;
+      }
+
+      .weight-value {
+        width: 60px;
+        flex-shrink: 0;
+        text-align: right;
+        font-weight: 600;
+        color: var(--el-color-primary);
+      }
+    }
+  }
+
+  .validation-box {
+    margin-top: 20px;
+  }
 }
 </style>

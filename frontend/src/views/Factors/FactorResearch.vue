@@ -1,9 +1,20 @@
 <template>
-  <div class="factor-research-container">
-    <el-card class="box-card">
+  <div class="factor-research">
+    <!-- 页面头部 -->
+    <div class="page-header">
+      <h1 class="page-title">
+        <el-icon><DataAnalysis /></el-icon>
+        因子研究与 IC 分析
+      </h1>
+      <p class="page-description">
+        评估因子在多调仓周期下的 IC、Rank IC 与分位数收益分布
+      </p>
+    </div>
+
+    <el-card class="research-card" shadow="never">
       <template #header>
         <div class="card-header">
-          <span>因子研究与 IC 分析</span>
+          <h3>因子与分析参数</h3>
         </div>
       </template>
 
@@ -33,26 +44,26 @@
       </el-form>
 
       <!-- IC 分析指标展示 -->
-      <div v-if="analysisResult" class="results-box" style="margin-top: 30px;">
-        <h3>分析结果摘要 (Factor: {{ selectedFactor }})</h3>
+      <div v-if="analysisResult" class="results-box">
+        <h4 class="section-title">分析结果摘要 (Factor: {{ selectedFactor }})</h4>
         <el-row :gutter="20">
-          <el-col :span="6">
+          <el-col :xs="12" :sm="6">
             <el-statistic title="IC 均值" :value="analysisResult.period_1d?.ic_mean || 0" :precision="4" />
           </el-col>
-          <el-col :span="6">
+          <el-col :xs="12" :sm="6">
             <el-statistic title="Rank IC 均值" :value="analysisResult.period_1d?.rank_ic_mean || 0" :precision="4" />
           </el-col>
-          <el-col :span="6">
+          <el-col :xs="12" :sm="6">
             <el-statistic title="IC IR" :value="analysisResult.period_1d?.ic_ir || 0" :precision="3" />
           </el-col>
-          <el-col :span="6">
+          <el-col :xs="12" :sm="6">
             <el-statistic title="Rank IC IR" :value="analysisResult.period_1d?.rank_ic_ir || 0" :precision="3" />
           </el-col>
         </el-row>
 
         <!-- 五分位数收益分布表 -->
-        <h4 style="margin-top: 30px;">五分位数 (Q1 - Q5) 未来收益率</h4>
-        <el-table :data="quantileTable" border style="width: 100%; margin-top: 10px;">
+        <h4 class="section-title">五分位数 (Q1 - Q5) 未来收益率</h4>
+        <el-table :data="quantileTable" border style="width: 100%;">
           <el-table-column prop="quantile" label="分位数" width="120" />
           <el-table-column prop="ret_1d" label="1D 收益率 (%)" />
           <el-table-column prop="ret_5d" label="5D 收益率 (%)" />
@@ -60,6 +71,7 @@
           <el-table-column prop="ret_20d" label="20D 收益率 (%)" />
         </el-table>
       </div>
+      <el-empty v-else description="请选择因子后点击「运行 IC 分析」" />
     </el-card>
   </div>
 </template>
@@ -67,6 +79,7 @@
 <script setup lang="ts">
 import { ref, computed } from "vue"
 import { ElMessage } from "element-plus"
+import { DataAnalysis } from "@element-plus/icons-vue"
 import factorsApi from "@/api/factors"
 
 const selectedFactor = ref("ret_1d")
@@ -109,11 +122,51 @@ const quantileTable = computed(() => {
 })
 </script>
 
-<style scoped>
-.factor-research-container {
-  padding: 20px;
-}
-.filter-form {
-  margin-top: 15px;
+<style lang="scss" scoped>
+.factor-research {
+  .page-header {
+    margin-bottom: 24px;
+
+    .page-title {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 24px;
+      font-weight: 600;
+      color: var(--el-text-color-primary);
+      margin: 0 0 8px 0;
+    }
+
+    .page-description {
+      color: var(--el-text-color-regular);
+      margin: 0;
+    }
+  }
+
+  .research-card {
+    .card-header h3 {
+      margin: 0;
+      font-size: 16px;
+      font-weight: 600;
+    }
+
+    .filter-form {
+      margin-top: 8px;
+    }
+
+    .results-box {
+      margin-top: 24px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+
+      .section-title {
+        margin: 0;
+        font-size: 15px;
+        font-weight: 600;
+        color: var(--el-text-color-primary);
+      }
+    }
+  }
 }
 </style>

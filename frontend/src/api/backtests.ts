@@ -1,5 +1,5 @@
 import axios from 'axios';
-import { BacktestResult } from '../types/backtest';
+import type { BacktestResult } from '../types/backtest';
 
 export const submitBacktest = async (payload: any): Promise<{ backtest_id: string; status: string }> => {
   const response = await axios.post('/api/backtests', payload);

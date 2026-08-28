@@ -1,55 +1,174 @@
 <template>
-  <div class="campaign-list p-6">
-    <div class="flex justify-between items-center mb-6">
-      <h1 class="text-2xl font-bold">实盘/模拟 Campaign 运行面板</h1>
-      <router-link to="/campaigns/create" class="px-4 py-2 bg-blue-600 text-white font-medium rounded hover:bg-blue-700 text-sm">
-        创建新 Campaign
-      </router-link>
-    </div>
-
-    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-      <div v-for="c in campaigns" :key="c.campaign_id" class="border p-4 rounded shadow bg-white">
-        <div class="flex justify-between items-center mb-2">
-          <span class="font-semibold text-lg">{{ c.name }}</span>
-          <span class="px-2 py-0.5 text-xs font-bold rounded uppercase" :class="getStatusClass(c.status)">{{ c.status }}</span>
+  <div class="campaign-list">
+    <!-- 页面头部 -->
+    <div class="page-header">
+      <div class="header-content">
+        <div class="title-section">
+          <h1 class="page-title">
+            <el-icon class="title-icon"><Promotion /></el-icon>
+            实盘/模拟 Campaign 运行面板
+          </h1>
+          <p class="page-description">
+            管理模拟与实盘 Campaign，跟踪运行状态与执行进度
+          </p>
         </div>
-        <p class="text-gray-600 text-sm mb-3">{{ c.description || '无描述' }}</p>
-        <div class="text-xs text-gray-500 mb-4 space-y-1">
-          <p>策略 ID: <span class="font-mono">{{ c.strategy_id }} (v{{ c.strategy_version_num }})</span></p>
-          <p>分配资金: ¥{{ c.initial_allocation_cash.toLocaleString() }}</p>
-          <p>开始日期: {{ c.start_date }}</p>
-        </div>
-        <div>
-          <router-link :to="`/campaigns/${c.campaign_id}`" class="block text-center px-3 py-1.5 bg-indigo-600 text-white text-xs rounded hover:bg-indigo-700">
-            查看详情与运行控制
-          </router-link>
+        <div class="header-actions">
+          <el-button type="primary" :icon="Plus" @click="$router.push('/campaigns/create')">
+            创建新 Campaign
+          </el-button>
         </div>
       </div>
     </div>
+
+    <!-- Campaign 卡片列表 -->
+    <el-row :gutter="24" v-loading="loading">
+      <el-col v-for="c in campaigns" :key="c.campaign_id" :xs="24" :sm="12" :lg="8" class="card-col">
+        <el-card class="campaign-card" shadow="hover">
+          <template #header>
+            <div class="card-header">
+              <span class="campaign-name">{{ c.name }}</span>
+              <el-tag :type="getStatusType(c.status)" size="small" effect="dark">
+                {{ c.status?.toUpperCase() }}
+              </el-tag>
+            </div>
+          </template>
+
+          <p class="campaign-desc">{{ c.description || '无描述' }}</p>
+
+          <el-descriptions :column="1" size="small" class="campaign-meta">
+            <el-descriptions-item label="策略 ID">
+              <span class="mono">{{ c.strategy_id }} (v{{ c.strategy_version_num }})</span>
+            </el-descriptions-item>
+            <el-descriptions-item label="分配资金">
+              ¥{{ c.initial_allocation_cash.toLocaleString() }}
+            </el-descriptions-item>
+            <el-descriptions-item label="开始日期">
+              {{ c.start_date }}
+            </el-descriptions-item>
+          </el-descriptions>
+
+          <div class="card-actions">
+            <el-button type="primary" size="small" :icon="View" @click="$router.push(`/campaigns/${c.campaign_id}`)">
+              查看详情与运行控制
+            </el-button>
+          </div>
+        </el-card>
+      </el-col>
+      <el-col :span="24" v-if="!loading && campaigns.length === 0">
+        <el-empty description="暂无 Campaign">
+          <el-button type="primary" :icon="Plus" @click="$router.push('/campaigns/create')">创建新 Campaign</el-button>
+        </el-empty>
+      </el-col>
+    </el-row>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue';
-import { listCampaigns } from '../../api/campaigns';
-import { Campaign } from '../../types/campaign';
+import { ref, onMounted } from 'vue'
+import { ElMessage } from 'element-plus'
+import { Promotion, Plus, View } from '@element-plus/icons-vue'
+import { listCampaigns } from '../../api/campaigns'
+import type { Campaign } from '../../types/campaign'
 
-const campaigns = ref<Campaign[]>([]);
+const campaigns = ref<Campaign[]>([])
+const loading = ref(false)
 
-onMounted(async () => {
+const loadData = async () => {
+  loading.value = true
   try {
-    campaigns.value = await listCampaigns();
+    campaigns.value = await listCampaigns()
   } catch (err) {
-    console.error('Failed to load campaigns:', err);
+    console.error('Failed to load campaigns:', err)
+    ElMessage.error('加载 Campaign 列表失败')
+  } finally {
+    loading.value = false
   }
-});
+}
 
-const getStatusClass = (status: string) => {
+const getStatusType = (status: string) => {
   switch (status) {
-    case 'activated': return 'bg-green-100 text-green-800';
-    case 'paused': return 'bg-yellow-100 text-yellow-800';
-    case 'stopped': return 'bg-red-100 text-red-800';
-    default: return 'bg-gray-100 text-gray-800';
+    case 'activated': return 'success'
+    case 'paused': return 'warning'
+    case 'stopped': return 'danger'
+    case 'draft': return 'info'
+    default: return 'info'
   }
-};
+}
+
+onMounted(() => {
+  loadData()
+})
 </script>
+
+<style lang="scss" scoped>
+.campaign-list {
+  .page-header {
+    margin-bottom: 24px;
+
+    .header-content {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 16px;
+    }
+
+    .page-title {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 24px;
+      font-weight: 600;
+      color: var(--el-text-color-primary);
+      margin: 0 0 8px 0;
+
+      .title-icon {
+        color: var(--el-color-primary);
+      }
+    }
+
+    .page-description {
+      color: var(--el-text-color-regular);
+      margin: 0;
+    }
+  }
+
+  .card-col {
+    margin-bottom: 24px;
+  }
+
+  .campaign-card {
+    height: 100%;
+
+    .card-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 8px;
+
+      .campaign-name {
+        font-size: 16px;
+        font-weight: 600;
+        color: var(--el-text-color-primary);
+      }
+    }
+
+    .campaign-desc {
+      color: var(--el-text-color-regular);
+      font-size: 14px;
+      line-height: 1.6;
+      min-height: 44px;
+      margin: 0 0 12px 0;
+    }
+
+    .card-actions {
+      display: flex;
+      justify-content: flex-end;
+    }
+
+    .mono {
+      font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+      font-size: 13px;
+    }
+  }
+}
+</style>

@@ -42,6 +42,26 @@
       <template #title>我的自选股</template>
     </el-menu-item>
 
+    <el-menu-item index="/factors">
+      <el-icon><DataAnalysis /></el-icon>
+      <template #title>因子管理</template>
+    </el-menu-item>
+
+    <el-menu-item index="/strategies">
+      <el-icon><PieChart /></el-icon>
+      <template #title>策略管理</template>
+    </el-menu-item>
+
+    <el-menu-item index="/skills">
+      <el-icon><MagicStick /></el-icon>
+      <template #title>技能管理</template>
+    </el-menu-item>
+
+    <el-menu-item index="/campaigns">
+      <el-icon><Promotion /></el-icon>
+      <template #title>活动列表</template>
+    </el-menu-item>
+
     <el-menu-item index="/paper">
       <el-icon><CreditCard /></el-icon>
       <template #title>模拟交易</template>
@@ -109,6 +129,10 @@ import {
   Search,
   Star,
   List,
+  DataAnalysis,
+  PieChart,
+  MagicStick,
+  Promotion,
   /* Document 移除：不再使用顶级分析报告菜单图标 */
   Setting,
   InfoFilled,
