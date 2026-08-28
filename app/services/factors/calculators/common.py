@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Mapping
 from typing import Any
 
 import numpy as np
@@ -16,6 +16,14 @@ NON_FINITE_OUTPUT = "non_finite_output"
 ZERO_DENOMINATOR = "zero_denominator"
 INVALID_DOMAIN = "invalid_domain"
 MISSING_VALUE = "missing_value"
+SUSPENDED = "suspended"
+
+
+DEFAULT_ANNUAL_TRADING_DAYS: dict[str, int] = {
+    "CN": 244,
+    "HK": 250,
+    "US": 252,
+}
 
 
 class FactorOutput(dict[str, pd.Series]):
@@ -36,6 +44,7 @@ class FactorOutput(dict[str, pd.Series]):
         input_columns: Iterable[str] = (),
         zero_denominator: pd.Series | None = None,
         invalid_domain: pd.Series | None = None,
+        quality_reason_masks: Mapping[str, pd.Series] | None = None,
         provenance: dict[str, Any] | None = None,
     ) -> None:
         if min_history < 1:
@@ -66,6 +75,10 @@ class FactorOutput(dict[str, pd.Series]):
         reasons.loc[insufficient] = INSUFFICIENT_HISTORY
         reasons.loc[non_finite_input] = NON_FINITE_INPUT
         reasons.loc[generated_non_finite] = NON_FINITE_OUTPUT
+        for reason, mask in (quality_reason_masks or {}).items():
+            reason_mask = to_series(mask, self._frame.index).fillna(False).astype(bool)
+            numeric_values = numeric_values.mask(reason_mask)
+            reasons.loc[reason_mask] = reason
         unexplained = numeric_values.isna() & reasons.isna()
         reasons.loc[unexplained] = MISSING_VALUE
 
@@ -242,18 +255,31 @@ def rolling_regression(values: pd.Series, window: int) -> tuple[pd.Series, pd.Se
     return rolling.apply(slope, raw=True), rolling.apply(r_squared, raw=True)
 
 
-def annual_trading_days(frame: pd.DataFrame) -> int:
+def annual_trading_days(
+    frame: pd.DataFrame,
+    market_days: Mapping[str, int] | None = None,
+) -> int:
+    configured = dict(DEFAULT_ANNUAL_TRADING_DAYS)
+    configured.update({market_code(market): int(days) for market, days in (market_days or {}).items()})
+    if any(days <= 0 for days in configured.values()):
+        raise ValueError("annual trading days must be positive")
     if "market" not in frame.columns:
-        return 252
-    markets = frame["market"].dropna().astype(str).str.upper().unique()
+        return configured.get("US", 252)
+    markets = frame["market"].dropna().map(market_code).unique()
     if len(markets) == 0:
-        return 252
+        return configured.get("US", 252)
     if len(markets) != 1:
         raise ValueError("each calculation group must contain exactly one market")
     try:
-        return {"CN": 244, "HK": 250, "US": 252}[markets[0]]
+        return configured[markets[0]]
     except KeyError as exc:
         raise ValueError(f"unsupported market: {markets[0]}") from exc
+
+
+def market_code(value: Any) -> str:
+    """Normalize string enums and plain market strings to CN/HK/US-style keys."""
+    raw = getattr(value, "value", value)
+    return str(raw).strip().upper().rsplit(".", 1)[-1]
 
 
 def adapt_macd_hist_for_legacy_ui(values: pd.Series) -> pd.Series:
