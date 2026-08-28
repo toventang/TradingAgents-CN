@@ -123,10 +123,48 @@ class OperationLogService:
 
             logger.info(f"📋 获取操作日志: 总数={total}, 返回={len(logs)}")
             return logs, total
-            
+
         except Exception as e:
             logger.error(f"获取操作日志失败: {e}")
             raise Exception(f"获取操作日志失败: {str(e)}")
+
+    async def export_logs(
+        self,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
+        action_type: Optional[str] = None,
+        limit: int = 10000,
+    ) -> List[OperationLogResponse]:
+        """导出操作日志（不受分页约束，用于 CSV 导出）"""
+        try:
+            db = get_mongo_db()
+            filter_query: Dict[str, Any] = {}
+
+            if start_date or end_date:
+                time_filter: Dict[str, Any] = {}
+                if start_date:
+                    start_str = start_date.replace('Z', '')
+                    time_filter["$gte"] = datetime.fromisoformat(start_str)
+                if end_date:
+                    end_str = end_date.replace('Z', '')
+                    time_filter["$lte"] = datetime.fromisoformat(end_str)
+                filter_query["timestamp"] = time_filter
+
+            if action_type:
+                filter_query["action_type"] = action_type
+
+            cursor = db[self.collection_name].find(filter_query).sort("timestamp", -1).limit(limit)
+            logs: List[OperationLogResponse] = []
+            async for doc in cursor:
+                doc = convert_objectid_to_str(doc)
+                logs.append(OperationLogResponse(**doc))
+
+            logger.info(f"📤 导出操作日志: 返回={len(logs)}")
+            return logs
+
+        except Exception as e:
+            logger.error(f"导出操作日志失败: {e}")
+            raise Exception(f"导出操作日志失败: {str(e)}")
     
     async def get_stats(self, days: int = 30) -> OperationLogStats:
         """获取操作日志统计"""

@@ -1,4 +1,3 @@
-import axios from 'axios';
 import { ApiClient, type ApiResponse } from './request';
 import type {
   NotificationPreference,
@@ -13,23 +12,23 @@ export type { NotificationItem } from '../types/notification';
 // ============ 偏好与分发日志（旧接口） ============
 
 export const getNotificationPreferences = async (): Promise<NotificationPreference> => {
-  const response = await axios.get('/api/notifications/preferences');
-  return response.data;
+  const res = await ApiClient.get<NotificationPreference>('/api/notifications/preferences');
+  return res as unknown as NotificationPreference;
 };
 
 export const updateNotificationPreferences = async (pref: NotificationPreference): Promise<NotificationPreference> => {
-  const response = await axios.put('/api/notifications/preferences', pref);
-  return response.data;
+  const res = await ApiClient.put<NotificationPreference>('/api/notifications/preferences', pref);
+  return res as unknown as NotificationPreference;
 };
 
 export const listNotificationLogs = async (): Promise<NotificationLog[]> => {
-  const response = await axios.get('/api/notifications/logs');
-  return response.data;
+  const res = await ApiClient.get<NotificationLog[]>('/api/notifications/logs');
+  return res as unknown as NotificationLog[];
 };
 
 export const testWebhook = async (targetUrl: string): Promise<any> => {
-  const response = await axios.post('/api/notifications/webhooks/test', { target_url: targetUrl });
-  return response.data;
+  const res = await ApiClient.post<any>('/api/notifications/webhooks/test', { target_url: targetUrl });
+  return res as unknown as any;
 };
 
 // ============ 用户通知列表 / 已读（store 使用） ============

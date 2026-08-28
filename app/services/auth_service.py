@@ -4,6 +4,7 @@ from app.utils.timezone import now_tz
 from typing import Optional
 import jwt
 from pydantic import BaseModel
+from fastapi import Header, HTTPException
 from app.core.config import settings
 
 class TokenData(BaseModel):
@@ -59,10 +60,34 @@ class AuthService:
         except Exception as e:
             logger.error(f"❌ Token验证异常: {str(e)}")
             return None
+
     @staticmethod
-    def get_canonical_user_id(token_data: Optional[TokenData]) -> Optional[str]:
-        """Convert verified token data into canonical user identity string."""
+    def extract_user_id(token_data: Optional[TokenData]) -> Optional[str]:
+        """从已验证的 TokenData 提取规范化的用户 ID（纯辅助函数，不作为 FastAPI 依赖）"""
         if not token_data or not token_data.sub:
             return None
         user_id = str(token_data.sub).strip()
         return user_id if user_id else None
+
+    @staticmethod
+    async def get_canonical_user_id(authorization: Optional[str] = Header(default=None)) -> str:
+        """FastAPI 依赖：从 Authorization Header 解析并返回规范化用户 ID
+
+        用法：`user_id: str = Depends(AuthService.get_canonical_user_id)`
+        """
+        if authorization is None:
+            raise HTTPException(status_code=401, detail="No authorization header")
+
+        if not authorization.lower().startswith("bearer "):
+            raise HTTPException(status_code=401, detail="Invalid authorization format")
+
+        token = authorization.split(" ", 1)[1]
+        token_data = AuthService.verify_token(token)
+        if not token_data:
+            raise HTTPException(status_code=401, detail="Invalid token")
+
+        user_id = AuthService.extract_user_id(token_data)
+        if not user_id:
+            raise HTTPException(status_code=401, detail="Invalid token: missing subject")
+
+        return user_id

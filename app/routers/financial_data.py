@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field
 
 from app.worker.financial_data_sync_service import get_financial_sync_service
 from app.services.financial_data_service import get_financial_data_service
-from app.core.response import ok
+from app.core.response import ok, fail
 
 logger = logging.getLogger(__name__)
 
@@ -111,9 +111,7 @@ async def get_latest_financial_data(
                 message="获取最新财务数据成功"
             )
         else:
-            return ok(success=False, data=None,
-                message="未找到财务数据"
-            )
+            return fail(message="未找到财务数据", code=404, data=None)
         
     except Exception as e:
         logger.error(f"❌ 获取最新财务数据失败 {symbol}: {e}")
@@ -200,17 +198,28 @@ async def sync_single_stock_financial(
         
         success_count = sum(1 for success in results.values() if success)
         total_count = len(results)
-        
-        return ok(
-            success=success_count > 0,
-            data={
-                "symbol": request.symbol,
-                "results": results,
-                "success_count": success_count,
-                "total_count": total_count
-            },
-            message=f"单股票财务数据同步完成: {success_count}/{total_count} 成功"
-        )
+
+        if success_count > 0:
+            return ok(
+                data={
+                    "symbol": request.symbol,
+                    "results": results,
+                    "success_count": success_count,
+                    "total_count": total_count
+                },
+                message=f"单股票财务数据同步完成: {success_count}/{total_count} 成功"
+            )
+        else:
+            return fail(
+                message=f"单股票财务数据同步失败: {success_count}/{total_count} 成功",
+                code=500,
+                data={
+                    "symbol": request.symbol,
+                    "results": results,
+                    "success_count": success_count,
+                    "total_count": total_count
+                }
+            )
         
     except Exception as e:
         logger.error(f"❌ 单股票财务数据同步失败 {request.symbol}: {e}")
@@ -264,11 +273,10 @@ async def health_check() -> dict:
         
     except Exception as e:
         logger.error(f"❌ 财务数据服务健康检查失败: {e}")
-        return ok(success=False, data={
+        return fail(message="财务数据服务异常", code=500, data={
                 "service_status": "unhealthy",
                 "error": str(e)
-            },
-            message="财务数据服务异常"
+            }
         )
 
 

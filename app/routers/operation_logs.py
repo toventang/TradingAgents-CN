@@ -213,17 +213,14 @@ async def export_logs_csv(
     """导出操作日志为CSV"""
     try:
         logger.info(f"📤 用户 {current_user['username']} 导出操作日志CSV")
-        
+
         service = get_operation_log_service()
-        query = OperationLogQuery(
-            page=1,
-            page_size=10000,  # 导出时获取更多数据
+        logs = await service.export_logs(
             start_date=start_date,
             end_date=end_date,
-            action_type=action_type
+            action_type=action_type,
+            limit=10000,
         )
-        
-        logs, _ = await service.get_logs(query)
         
         # 生成CSV内容
         import csv

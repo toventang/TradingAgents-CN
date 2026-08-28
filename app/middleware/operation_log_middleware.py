@@ -153,7 +153,7 @@ class OperationLogMiddleware(BaseHTTPMiddleware):
             if token:
                 from app.services.auth_service import AuthService
                 token_data = AuthService.verify_token(token)
-                user_id = AuthService.get_canonical_user_id(token_data)
+                user_id = AuthService.extract_user_id(token_data)
 
                 if user_id:
                     return {

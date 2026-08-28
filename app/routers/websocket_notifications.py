@@ -126,7 +126,7 @@ async def websocket_notifications_endpoint(
     WebSocket 通知端点
     """
     token_data = AuthService.verify_token(token)
-    user_id = AuthService.get_canonical_user_id(token_data)
+    user_id = AuthService.extract_user_id(token_data)
     if not token_data or not user_id:
         await websocket.close(code=1008, reason="Unauthorized")
         return
@@ -193,7 +193,7 @@ async def websocket_task_progress_endpoint(
     WebSocket 任务进度端点
     """
     token_data = AuthService.verify_token(token)
-    user_id = AuthService.get_canonical_user_id(token_data)
+    user_id = AuthService.extract_user_id(token_data)
     if not token_data or not user_id:
         await websocket.close(code=1008, reason="Unauthorized")
         return

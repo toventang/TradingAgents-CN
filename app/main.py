@@ -69,6 +69,7 @@ from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 from app.services.quotes_ingestion_service import QuotesIngestionService
 from app.routers import paper as paper_router, domain_tasks as domain_tasks_router, factors as factors_router
+from app.routers import strategies as strategies_router, campaigns as campaigns_router, skills as skills_router
 
 
 def get_version() -> str:
@@ -707,7 +708,9 @@ from app.routers import system_config as system_config_router
 app.include_router(system_config_router.router, prefix="/api/system", tags=["system"])
 
 # 通知模块（REST + SSE）
-app.include_router(notifications_router.router, prefix="/api", tags=["notifications"])
+# 注意：notifications_router 自身已声明 prefix="/api/notifications"，
+# 此处不可再叠加 prefix="/api"，否则会产生 /api/api/notifications/* 双重前缀。
+app.include_router(notifications_router.router, tags=["notifications"])
 
 # 🔥 WebSocket 通知模块（替代 SSE + Redis PubSub）
 app.include_router(websocket_notifications_router.router, prefix="/api", tags=["websocket"])
@@ -721,9 +724,12 @@ app.include_router(multi_source_sync.router)
 app.include_router(paper_router.router, prefix="/api", tags=["paper"])
 app.include_router(domain_tasks_router.router)
 app.include_router(factors_router.router)
-app.include_router(tushare_init.router, prefix="/api", tags=["tushare-init"])
-app.include_router(akshare_init.router, prefix="/api", tags=["akshare-init"])
-app.include_router(baostock_init.router, prefix="/api", tags=["baostock-init"])
+app.include_router(strategies_router.router)
+app.include_router(campaigns_router.router)
+app.include_router(skills_router.router)
+app.include_router(tushare_init.router, tags=["tushare-init"])
+app.include_router(akshare_init.router, tags=["akshare-init"])
+app.include_router(baostock_init.router, tags=["baostock-init"])
 app.include_router(historical_data.router, tags=["historical-data"])
 app.include_router(multi_period_sync.router, tags=["multi-period-sync"])
 app.include_router(financial_data.router, tags=["financial-data"])
