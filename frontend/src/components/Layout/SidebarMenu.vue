@@ -32,6 +32,16 @@
       <template #title>任务中心</template>
     </el-menu-item>
 
+    <el-sub-menu index="/factors">
+      <template #title>
+        <el-icon><DataAnalysis /></el-icon>
+        <span>因子中心</span>
+      </template>
+      <el-menu-item index="/factors/catalog">因子目录</el-menu-item>
+      <el-menu-item index="/factors/compute">发起计算</el-menu-item>
+      <el-menu-item index="/factors/snapshots">数据快照</el-menu-item>
+    </el-sub-menu>
+
     <el-menu-item index="/screening">
       <el-icon><Search /></el-icon>
       <template #title>股票筛选</template>
@@ -109,6 +119,7 @@ import {
   Search,
   Star,
   List,
+  DataAnalysis,
   /* Document 移除：不再使用顶级分析报告菜单图标 */
   Setting,
   InfoFilled,

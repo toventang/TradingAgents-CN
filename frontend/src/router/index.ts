@@ -200,6 +200,38 @@ const routes: RouteRecordRaw[] = [
       }
     ]
   },
+  {
+    path: '/factors',
+    name: 'Factors',
+    component: () => import('@/layouts/BasicLayout.vue'),
+    redirect: '/factors/catalog',
+    meta: {
+      title: '因子中心',
+      icon: 'DataAnalysis',
+      requiresAuth: true,
+      transition: 'slide-up'
+    },
+    children: [
+      {
+        path: 'catalog',
+        name: 'FactorCatalog',
+        component: () => import('@/views/Factors/FactorCatalogView.vue'),
+        meta: { title: '因子目录', requiresAuth: true }
+      },
+      {
+        path: 'compute',
+        name: 'FactorCompute',
+        component: () => import('@/views/Factors/FactorComputeView.vue'),
+        meta: { title: '因子计算', requiresAuth: true }
+      },
+      {
+        path: 'snapshots',
+        name: 'FactorSnapshots',
+        component: () => import('@/views/Factors/FactorSnapshotsView.vue'),
+        meta: { title: '因子快照', requiresAuth: true }
+      }
+    ]
+  },
   { path: '/queue', redirect: '/tasks' },
   { path: '/analysis/history', redirect: '/tasks?tab=completed' },
   {
