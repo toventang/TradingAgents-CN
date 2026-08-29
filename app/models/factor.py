@@ -328,6 +328,7 @@ class FactorComputeRequest(BaseModel):
 
     universe_snapshot_id: str = Field(min_length=1, max_length=200)
     members: tuple[FactorUniverseMember, ...] = Field(min_length=1)
+    start_date: date | None = None
     trade_date: date
     as_of: datetime
     factors: tuple[FactorVersionRef, ...] = Field(min_length=1)
@@ -335,6 +336,7 @@ class FactorComputeRequest(BaseModel):
     adjustment: str = Field(default="qfq", pattern=r"^(qfq|hfq|none)$")
     chunk_size: StrictInt = Field(default=100, ge=1, le=1000)
     workers: StrictInt = Field(default_factory=_default_factor_workers, ge=1, le=16)
+    request_nonce: str | None = Field(default=None, min_length=1, max_length=120)
 
     @field_validator("as_of")
     @classmethod
@@ -363,6 +365,10 @@ class FactorComputeRequest(BaseModel):
             raise ValueError("requested factor versions must be unique")
         if self.trade_date > self.as_of.date():
             raise ValueError("trade_date cannot be after as_of")
+        if self.start_date is not None and self.start_date > self.trade_date:
+            raise ValueError("start_date cannot be after trade_date")
+        if self.request_nonce is not None and self.request_nonce != self.request_nonce.strip():
+            raise ValueError("request_nonce must be trimmed")
         if any(not key.strip() or not value.strip() for key, value in self.source_versions.items()):
             raise ValueError("source_versions keys and values cannot be blank")
         return self
@@ -373,6 +379,7 @@ class FactorComputeRequest(BaseModel):
 
     def semantic_payload(self) -> dict[str, Any]:
         payload = self.model_dump(mode="json", exclude={"chunk_size", "workers"})
+        payload["start_date"] = payload["start_date"] or payload["trade_date"]
         payload["members"] = sorted(
             payload["members"], key=lambda item: (item["market"], item["symbol"])
         )
@@ -415,7 +422,7 @@ class FactorJob(BaseModel):
     @classmethod
     def normalize_timestamps(cls, value: datetime) -> datetime:
         if value.tzinfo is None or value.utcoffset() is None:
-            raise ValueError("job timestamps must be timezone-aware")
+            return value.replace(tzinfo=timezone.utc)
         return value.astimezone(timezone.utc)
 
     @model_validator(mode="after")
@@ -466,7 +473,7 @@ class FactorSnapshot(BaseModel):
         if value is None:
             return None
         if value.tzinfo is None or value.utcoffset() is None:
-            raise ValueError("snapshot timestamps must be timezone-aware")
+            return value.replace(tzinfo=timezone.utc)
         return value.astimezone(timezone.utc)
 
     @model_validator(mode="after")
@@ -514,6 +521,149 @@ class FactorValueRow(BaseModel):
             if value is not None and not float("-inf") < float(value) < float("inf"):
                 raise ValueError("factor values must be finite or null")
         return values
+
+
+class FactorUniverseSelection(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    snapshot_id: str = Field(min_length=1, max_length=200)
+    symbols: tuple[str, ...] = Field(min_length=1, max_length=5000)
+
+    @model_validator(mode="before")
+    @classmethod
+    def accept_explicit_universe_snapshot_name(cls, values: Any) -> Any:
+        if not isinstance(values, dict) or "snapshot_id" in values:
+            return values
+        if "universe_snapshot_id" not in values:
+            return values
+        normalized = dict(values)
+        normalized["snapshot_id"] = normalized.pop("universe_snapshot_id")
+        return normalized
+
+    @field_validator("snapshot_id")
+    @classmethod
+    def validate_snapshot_id(cls, value: str) -> str:
+        if not value.strip() or value != value.strip():
+            raise ValueError("universe snapshot_id must be non-blank and trimmed")
+        return value
+
+    @field_validator("symbols")
+    @classmethod
+    def validate_symbols(cls, values: tuple[str, ...]) -> tuple[str, ...]:
+        if any(not item.strip() or item != item.strip() for item in values):
+            raise ValueError("universe symbols must be non-blank and trimmed")
+        if len(set(values)) != len(values):
+            raise ValueError("universe symbols must be unique")
+        return values
+
+
+class FactorValidateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    market: Market
+    factor_specs: tuple[FactorVersionRef, ...] = Field(min_length=1)
+
+
+class FactorValidationIssue(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    code: str
+    message: str
+    factor_id: str | None = None
+
+
+class FactorValidateResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    valid: bool
+    issues: list[FactorValidationIssue] = Field(default_factory=list)
+    execution_order: tuple[str, ...] = ()
+    required_columns: tuple[str, ...] = ()
+    common_intermediates: tuple[str, ...] = ()
+    plan_checksum: str | None = None
+
+
+class FactorComputeApiRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    market: Market
+    universe: FactorUniverseSelection
+    start_date: date
+    end_date: date
+    as_of: datetime
+    factor_specs: tuple[FactorVersionRef, ...] = Field(min_length=1)
+    source_versions: dict[str, str] = Field(min_length=1)
+    adj: str = Field(default="qfq", pattern=r"^(qfq|hfq|none)$")
+    force_recompute: bool = False
+    chunk_size: StrictInt = Field(default=100, ge=1, le=1000)
+    workers: StrictInt = Field(default_factory=_default_factor_workers, ge=1, le=16)
+
+    @field_validator("as_of")
+    @classmethod
+    def normalize_as_of(cls, value: datetime) -> datetime:
+        if value.tzinfo is None or value.utcoffset() is None:
+            raise ValueError("as_of must be timezone-aware")
+        return value.astimezone(timezone.utc)
+
+    @model_validator(mode="after")
+    def validate_dates_and_versions(self) -> "FactorComputeApiRequest":
+        if self.start_date > self.end_date:
+            raise ValueError("start_date cannot be after end_date")
+        if self.end_date > self.as_of.date():
+            raise ValueError("end_date cannot be after as_of")
+        if any(not key.strip() or not value.strip() for key, value in self.source_versions.items()):
+            raise ValueError("source_versions keys and values cannot be blank")
+        return self
+
+
+class FactorComputeAccepted(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    job_id: str
+    task_id: str
+    request_checksum: str = Field(pattern=r"^[0-9a-f]{64}$")
+    deduplicated: bool
+
+
+class FactorDefinitionListResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    items: list[FactorDefinition]
+    page: int
+    page_size: int
+    total: int
+
+
+class FactorSnapshotListResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    items: list[FactorSnapshot]
+    page: int
+    page_size: int
+    total: int
+
+
+class FactorValueApiRow(FactorValueRow):
+    created_at: datetime | None = None
+
+    @field_validator("created_at")
+    @classmethod
+    def normalize_created_at(cls, value: datetime | None) -> datetime | None:
+        if value is None:
+            return None
+        if value.tzinfo is None or value.utcoffset() is None:
+            return value.replace(tzinfo=timezone.utc)
+        return value.astimezone(timezone.utc)
+
+
+class FactorValuePage(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    snapshot: FactorSnapshot
+    items: list[FactorValueApiRow]
+    page: int
+    page_size: int
+    total: int
 
 
 def _stable_json(value: Any) -> str:

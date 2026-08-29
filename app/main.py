@@ -70,6 +70,7 @@ from apscheduler.triggers.interval import IntervalTrigger
 from app.services.quotes_ingestion_service import QuotesIngestionService
 from app.routers import paper as paper_router
 from app.routers import domain_tasks as domain_tasks_router
+from app.routers import factors as factors_router
 
 
 def get_version() -> str:
@@ -229,6 +230,15 @@ async def lifespan(app: FastAPI):
         raise
 
     await init_db()
+
+    # The factor rollout is opt-in.  Build its uniqueness/query indexes only
+    # when enabled, before accepting compute requests.
+    from app.services.factors.api_service import factor_feature_enabled
+    if factor_feature_enabled():
+        from app.core.database import get_mongo_db
+        from app.repositories.factor_repository import FactorRepository
+
+        await FactorRepository(get_mongo_db()).ensure_compute_indexes()
 
     #  配置桥接：将统一配置写入环境变量，供 TradingAgents 核心库使用
     try:
@@ -691,6 +701,7 @@ app.include_router(reports.router, tags=["reports"])
 app.include_router(screening.router, prefix="/api/screening", tags=["screening"])
 app.include_router(queue.router, prefix="/api/queue", tags=["queue"])
 app.include_router(domain_tasks_router.router, prefix="/api")
+app.include_router(factors_router.router, prefix="/api")
 app.include_router(favorites.router, prefix="/api", tags=["favorites"])
 app.include_router(stocks_router.router, prefix="/api", tags=["stocks"])
 app.include_router(multi_market_stocks_router.router, prefix="/api", tags=["multi-market"])
