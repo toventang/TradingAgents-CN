@@ -20,7 +20,9 @@ const router = useRouter()
 const options = [
   { label: '因子目录', value: '/factors/catalog' },
   { label: '发起计算', value: '/factors/compute' },
-  { label: '数据快照', value: '/factors/snapshots' }
+  { label: '数据快照', value: '/factors/snapshots' },
+  { label: '因子实验室', value: '/factors/research' },
+  { label: '组合编辑器', value: '/factors/composites' }
 ]
 const activePath = computed({
   get: () => route.path,

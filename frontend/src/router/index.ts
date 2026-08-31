@@ -229,6 +229,18 @@ const routes: RouteRecordRaw[] = [
         name: 'FactorSnapshots',
         component: () => import('@/views/Factors/FactorSnapshotsView.vue'),
         meta: { title: '因子快照', requiresAuth: true }
+      },
+      {
+        path: 'research',
+        name: 'FactorResearch',
+        component: () => import('@/views/Factors/FactorResearchView.vue'),
+        meta: { title: '因子实验室', requiresAuth: true }
+      },
+      {
+        path: 'composites',
+        name: 'FactorComposites',
+        component: () => import('@/views/Factors/FactorCompositeView.vue'),
+        meta: { title: '组合因子编辑器', requiresAuth: true }
       }
     ]
   },

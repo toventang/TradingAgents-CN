@@ -1,6 +1,13 @@
 import { request } from './request'
 import type {
+  CompositeDefinition,
+  CompositeDefinitionPayload,
+  CompositeFactorResource,
+  CompositeValidationResponse,
   DomainTask,
+  FactorAnalysisAccepted,
+  FactorAnalysisRequest,
+  FactorAnalysisResult,
   FactorComputeAccepted,
   FactorComputeRequest,
   FactorDefinition,
@@ -59,6 +66,41 @@ export const factorApi = {
     return body(await request.get(
       `/api/factors/snapshots/${encodeURIComponent(snapshotId)}/values`,
       { params }
+    ))
+  },
+
+  async analyze(payload: FactorAnalysisRequest): Promise<FactorAnalysisAccepted> {
+    return body(await request.post('/api/factors/analyze', payload))
+  },
+
+  async getAnalysis(analysisId: string): Promise<FactorAnalysisResult> {
+    return body(await request.get(`/api/factors/analysis/${encodeURIComponent(analysisId)}`))
+  },
+
+  async validateComposite(
+    market: string,
+    definition: CompositeDefinition
+  ): Promise<CompositeValidationResponse> {
+    return body(await request.post('/api/factor-composites/validate', { market, definition }))
+  },
+
+  async createComposite(payload: CompositeDefinitionPayload): Promise<CompositeFactorResource> {
+    return body(await request.post('/api/factor-composites', payload))
+  },
+
+  async updateComposite(
+    compositeId: string,
+    payload: CompositeDefinitionPayload
+  ): Promise<CompositeFactorResource> {
+    return body(await request.put(
+      `/api/factor-composites/${encodeURIComponent(compositeId)}`,
+      payload
+    ))
+  },
+
+  async publishComposite(compositeId: string): Promise<CompositeFactorResource> {
+    return body(await request.post(
+      `/api/factor-composites/${encodeURIComponent(compositeId)}/publish`
     ))
   }
 }
