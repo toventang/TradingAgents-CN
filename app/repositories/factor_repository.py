@@ -11,6 +11,8 @@ from pymongo.errors import DuplicateKeyError
 
 from app.core.database import get_mongo_db
 from app.models.factor import (
+    CompositeFactorResource,
+    CompositeStatus,
     FactorAnalysisResult,
     FactorComputeRequest,
     FactorJob,
@@ -35,12 +37,17 @@ class FactorAnalysisConflict(RuntimeError):
     """An immutable analysis ID disagrees with persisted result content."""
 
 
+class FactorCompositeConflict(RuntimeError):
+    """A composite version or state transition conflicts with stored state."""
+
+
 class FactorRepository:
     COLLECTION = "factor_definitions"
     JOBS_COLLECTION = "factor_jobs"
     SNAPSHOTS_COLLECTION = "factor_snapshots"
     VALUES_COLLECTION = "factor_values"
     ANALYSIS_COLLECTION = "factor_analysis_results"
+    COMPOSITES_COLLECTION = "factor_composites"
 
     def __init__(self, db=None, registry: FactorRegistry | None = None):
         self._db = db
@@ -49,6 +56,8 @@ class FactorRepository:
         self._compute_index_lock = asyncio.Lock()
         self._analysis_indexes_ready = False
         self._analysis_index_lock = asyncio.Lock()
+        self._composite_indexes_ready = False
+        self._composite_index_lock = asyncio.Lock()
 
     def get_db(self):
         return self._db if self._db is not None else get_mongo_db()
@@ -153,6 +162,33 @@ class FactorRepository:
                 name="factor_analysis_owner_created",
             )
             self._analysis_indexes_ready = True
+
+    async def ensure_composite_indexes(self) -> None:
+        if self._composite_indexes_ready:
+            return
+        async with self._composite_index_lock:
+            if self._composite_indexes_ready:
+                return
+            collection = self.get_db()[self.COMPOSITES_COLLECTION]
+            await collection.create_index(
+                [
+                    ("user_id", ASCENDING),
+                    ("composite_id", ASCENDING),
+                    ("version", ASCENDING),
+                ],
+                unique=True,
+                name="factor_composite_owner_id_version_unique",
+            )
+            await collection.create_index(
+                [
+                    ("user_id", ASCENDING),
+                    ("composite_id", ASCENDING),
+                    ("status", ASCENDING),
+                    ("version", DESCENDING),
+                ],
+                name="factor_composite_owner_state_version",
+            )
+            self._composite_indexes_ready = True
 
     async def sync_definitions(self) -> int:
         """Insert missing active metadata and reject in-place version changes."""
@@ -605,6 +641,110 @@ class FactorRepository:
             None
             if document is None
             else _parse_model(FactorAnalysisResult, document)
+        )
+
+    async def create_composite(
+        self, resource: CompositeFactorResource
+    ) -> CompositeFactorResource:
+        await self.ensure_composite_indexes()
+        collection = self.get_db()[self.COMPOSITES_COLLECTION]
+        try:
+            await collection.insert_one(resource.model_dump(mode="json"))
+        except DuplicateKeyError as exc:
+            raise FactorCompositeConflict(
+                "composite version already exists"
+            ) from exc
+        document = await collection.find_one(
+            {
+                "user_id": resource.user_id,
+                "composite_id": resource.composite_id,
+                "version": resource.version,
+            }
+        )
+        if document is None:
+            raise RuntimeError("composite insert did not persist a document")
+        return _parse_model(CompositeFactorResource, document)
+
+    async def get_latest_composite(
+        self, composite_id: str, *, user_id: str
+    ) -> CompositeFactorResource | None:
+        document = await self.get_db()[self.COMPOSITES_COLLECTION].find_one(
+            {"user_id": user_id, "composite_id": composite_id},
+            sort=[("version", DESCENDING)],
+        )
+        return (
+            None
+            if document is None
+            else _parse_model(CompositeFactorResource, document)
+        )
+
+    async def replace_composite_draft(
+        self,
+        replacement: CompositeFactorResource,
+        *,
+        expected_definition_checksum: str,
+    ) -> CompositeFactorResource | None:
+        if replacement.status != CompositeStatus.DRAFT:
+            raise ValueError("only draft composites can be replaced")
+        document = await self.get_db()[self.COMPOSITES_COLLECTION].find_one_and_update(
+            {
+                "user_id": replacement.user_id,
+                "composite_id": replacement.composite_id,
+                "version": replacement.version,
+                "status": CompositeStatus.DRAFT.value,
+                "definition_checksum": expected_definition_checksum,
+            },
+            {
+                "$set": replacement.model_dump(
+                    mode="json",
+                    exclude={
+                        "composite_id",
+                        "user_id",
+                        "version",
+                        "status",
+                        "created_at",
+                        "published_at",
+                    },
+                )
+            },
+            return_document=ReturnDocument.AFTER,
+        )
+        return (
+            None
+            if document is None
+            else _parse_model(CompositeFactorResource, document)
+        )
+
+    async def publish_composite(
+        self,
+        *,
+        composite_id: str,
+        user_id: str,
+        version: int,
+        definition_checksum: str,
+        published_at: datetime,
+    ) -> CompositeFactorResource | None:
+        document = await self.get_db()[self.COMPOSITES_COLLECTION].find_one_and_update(
+            {
+                "user_id": user_id,
+                "composite_id": composite_id,
+                "version": version,
+                "status": CompositeStatus.DRAFT.value,
+                "definition_checksum": definition_checksum,
+            },
+            {
+                "$set": {
+                    "status": CompositeStatus.PUBLISHED.value,
+                    "published_at": published_at,
+                    "updated_at": published_at,
+                }
+            },
+            return_document=ReturnDocument.AFTER,
+        )
+        return (
+            None
+            if document is None
+            else _parse_model(CompositeFactorResource, document)
         )
 
     async def _update_job(

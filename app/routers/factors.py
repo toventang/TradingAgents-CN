@@ -10,6 +10,11 @@ from pymongo.errors import PyMongoError
 
 from app.core.database import get_mongo_db
 from app.models.factor import (
+    CompositeCreateRequest,
+    CompositeFactorResource,
+    CompositeUpdateRequest,
+    CompositeValidateRequest,
+    CompositeValidationResponse,
     FactorAnalysisAccepted,
     FactorAnalysisRequest,
     FactorAnalysisResult,
@@ -42,9 +47,18 @@ from app.services.factors.analysis import (
     FactorAnalysisError,
     FactorAnalysisNotFound,
 )
+from app.services.factors.composites import (
+    CompositeDslEngine,
+    CompositeDslError,
+    CompositeFactorService,
+    CompositeNotFound,
+    CompositeStateConflict,
+)
 
 
-router = APIRouter(prefix="/factors", tags=["factors"])
+router = APIRouter()
+factor_router = APIRouter(prefix="/factors", tags=["factors"])
+composite_router = APIRouter(prefix="/factor-composites", tags=["factor-composites"])
 
 
 def get_factor_api_service() -> FactorApiService:
@@ -61,6 +75,10 @@ def get_factor_analysis_api_service() -> FactorAnalysisApiService:
         factor_repository=FactorRepository(database),
         task_repository=DomainTaskRepository(database),
     )
+
+
+def get_composite_factor_service() -> CompositeFactorService:
+    return CompositeFactorService(FactorRepository(get_mongo_db()))
 
 
 def require_factor_feature() -> None:
@@ -82,7 +100,7 @@ def _raise_store_unavailable(exc: Exception) -> NoReturn:
     ) from exc
 
 
-@router.get("/definitions", response_model=FactorDefinitionListResponse)
+@factor_router.get("/definitions", response_model=FactorDefinitionListResponse)
 async def list_factor_definitions(
     category: FactorCategory | None = Query(default=None),
     market: Market | None = Query(default=None),
@@ -104,7 +122,7 @@ async def list_factor_definitions(
     )
 
 
-@router.get("/definitions/{factor_id}", response_model=FactorDefinition)
+@factor_router.get("/definitions/{factor_id}", response_model=FactorDefinition)
 async def get_factor_definition(
     factor_id: str,
     _feature: None = Depends(require_factor_feature),
@@ -120,17 +138,22 @@ async def get_factor_definition(
         ) from exc
 
 
-@router.post("/validate", response_model=FactorValidateResponse)
+@factor_router.post(
+    "/validate",
+    response_model=FactorValidateResponse | CompositeValidationResponse,
+)
 async def validate_factor_request(
-    payload: FactorValidateRequest,
+    payload: FactorValidateRequest | CompositeValidateRequest,
     _feature: None = Depends(require_factor_feature),
     _current_user: dict = Depends(get_current_user),
     service: FactorApiService = Depends(get_factor_api_service),
-) -> FactorValidateResponse:
+) -> FactorValidateResponse | CompositeValidationResponse:
+    if isinstance(payload, CompositeValidateRequest):
+        return CompositeDslEngine().validation_response(payload)
     return service.validate(payload)
 
 
-@router.post(
+@factor_router.post(
     "/compute",
     response_model=FactorComputeAccepted,
     status_code=status.HTTP_202_ACCEPTED,
@@ -161,7 +184,7 @@ async def create_factor_compute(
         _raise_store_unavailable(exc)
 
 
-@router.get("/jobs/{job_id}", response_model=FactorJob)
+@factor_router.get("/jobs/{job_id}", response_model=FactorJob)
 async def get_factor_job(
     job_id: str,
     _feature: None = Depends(require_factor_feature),
@@ -179,7 +202,7 @@ async def get_factor_job(
         _raise_store_unavailable(exc)
 
 
-@router.get("/snapshots", response_model=FactorSnapshotListResponse)
+@factor_router.get("/snapshots", response_model=FactorSnapshotListResponse)
 async def list_factor_snapshots(
     market: Market | None = Query(default=None),
     trade_date: date | None = Query(default=None),
@@ -205,7 +228,7 @@ async def list_factor_snapshots(
         _raise_store_unavailable(exc)
 
 
-@router.get("/snapshots/{snapshot_id}/values", response_model=FactorValuePage)
+@factor_router.get("/snapshots/{snapshot_id}/values", response_model=FactorValuePage)
 async def list_factor_values(
     snapshot_id: str,
     symbol: str | None = Query(default=None, min_length=1, max_length=64),
@@ -237,7 +260,7 @@ async def list_factor_values(
         _raise_store_unavailable(exc)
 
 
-@router.post(
+@factor_router.post(
     "/analyze",
     response_model=FactorAnalysisAccepted,
     status_code=status.HTTP_202_ACCEPTED,
@@ -264,7 +287,7 @@ async def create_factor_analysis(
         _raise_store_unavailable(exc)
 
 
-@router.get("/analysis/{analysis_id}", response_model=FactorAnalysisResult)
+@factor_router.get("/analysis/{analysis_id}", response_model=FactorAnalysisResult)
 async def get_factor_analysis(
     analysis_id: str,
     _feature: None = Depends(require_factor_feature),
@@ -285,3 +308,108 @@ async def get_factor_analysis(
         ) from exc
     except PyMongoError as exc:
         _raise_store_unavailable(exc)
+
+
+@composite_router.post(
+    "",
+    response_model=CompositeFactorResource,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_composite_factor(
+    payload: CompositeCreateRequest,
+    _feature: None = Depends(require_factor_feature),
+    current_user: dict = Depends(get_current_user),
+    service: CompositeFactorService = Depends(get_composite_factor_service),
+) -> CompositeFactorResource:
+    try:
+        return await service.create(user_id=current_user["id"], request=payload)
+    except CompositeDslError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail={"code": exc.code, "message": str(exc), "factor_id": exc.factor_id},
+        ) from exc
+    except CompositeStateConflict as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=_error(exc.code, str(exc)),
+        ) from exc
+    except PyMongoError as exc:
+        _raise_store_unavailable(exc)
+
+
+@composite_router.put("/{composite_id}", response_model=CompositeFactorResource)
+async def update_composite_factor(
+    composite_id: str,
+    payload: CompositeUpdateRequest,
+    _feature: None = Depends(require_factor_feature),
+    current_user: dict = Depends(get_current_user),
+    service: CompositeFactorService = Depends(get_composite_factor_service),
+) -> CompositeFactorResource:
+    try:
+        return await service.update(
+            user_id=current_user["id"],
+            composite_id=composite_id,
+            request=payload,
+        )
+    except CompositeNotFound as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=_error("COMPOSITE_NOT_FOUND", "Composite factor was not found"),
+        ) from exc
+    except CompositeDslError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail={"code": exc.code, "message": str(exc), "factor_id": exc.factor_id},
+        ) from exc
+    except CompositeStateConflict as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=_error(exc.code, str(exc)),
+        ) from exc
+    except PyMongoError as exc:
+        _raise_store_unavailable(exc)
+
+
+@composite_router.post(
+    "/{composite_id}/publish",
+    response_model=CompositeFactorResource,
+)
+async def publish_composite_factor(
+    composite_id: str,
+    _feature: None = Depends(require_factor_feature),
+    current_user: dict = Depends(get_current_user),
+    service: CompositeFactorService = Depends(get_composite_factor_service),
+) -> CompositeFactorResource:
+    try:
+        return await service.publish(
+            user_id=current_user["id"], composite_id=composite_id
+        )
+    except CompositeNotFound as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=_error("COMPOSITE_NOT_FOUND", "Composite factor was not found"),
+        ) from exc
+    except CompositeStateConflict as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=_error(exc.code, str(exc)),
+        ) from exc
+    except PyMongoError as exc:
+        _raise_store_unavailable(exc)
+
+
+@composite_router.post(
+    "/validate",
+    response_model=CompositeValidationResponse,
+)
+async def validate_composite_factor(
+    payload: CompositeValidateRequest,
+    _feature: None = Depends(require_factor_feature),
+    _current_user: dict = Depends(get_current_user),
+    service: CompositeFactorService = Depends(get_composite_factor_service),
+) -> CompositeValidationResponse:
+    return service.validate(payload)
+
+
+router.include_router(factor_router)
+router.include_router(composite_router)

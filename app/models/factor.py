@@ -956,5 +956,296 @@ class FactorAnalysisResult(BaseModel):
         return self
 
 
+class CompositeTransformKind(str, Enum):
+    IDENTITY = "identity"
+    NEGATE = "negate"
+    LOG1P_ABS = "log1p_abs"
+    WINSORIZE_MAD = "winsorize_mad"
+    WINSORIZE_QUANTILE = "winsorize_quantile"
+    ZSCORE = "zscore"
+    ROBUST_ZSCORE = "robust_zscore"
+    PERCENTILE_RANK = "percentile_rank"
+
+
+class CompositeNeutralizeKind(str, Enum):
+    NONE = "none"
+    INDUSTRY = "industry"
+    MARKET_CAP = "market_cap"
+    INDUSTRY_AND_MARKET_CAP = "industry_and_market_cap"
+
+
+class CompositeArithmeticKind(str, Enum):
+    WEIGHTED_SUM = "weighted_sum"
+    MEAN = "mean"
+    GEOMETRIC_MEAN = "geometric_mean"
+
+
+class CompositeMissingKind(str, Enum):
+    DROP_SYMBOL = "drop_symbol"
+    RENORMALIZE_WEIGHTS = "renormalize_weights"
+    NEUTRAL_SCORE = "neutral_score"
+
+
+class CompositeStatus(str, Enum):
+    DRAFT = "draft"
+    PUBLISHED = "published"
+
+
+class CompositeTransformSpec(BaseModel):
+    """Closed transform with parameters valid only for its selected operation."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    kind: CompositeTransformKind = CompositeTransformKind.IDENTITY
+    mad_scale: float | None = Field(default=None, gt=0.0, le=20.0)
+    lower_quantile: float | None = Field(default=None, ge=0.0, lt=0.5)
+    upper_quantile: float | None = Field(default=None, gt=0.5, le=1.0)
+
+    @model_validator(mode="after")
+    def validate_transform_parameters(self) -> "CompositeTransformSpec":
+        if self.kind == CompositeTransformKind.WINSORIZE_MAD:
+            if self.lower_quantile is not None or self.upper_quantile is not None:
+                raise ValueError("winsorize_mad does not accept quantile parameters")
+            if self.mad_scale is None:
+                object.__setattr__(self, "mad_scale", 3.0)
+        elif self.kind == CompositeTransformKind.WINSORIZE_QUANTILE:
+            if self.mad_scale is not None:
+                raise ValueError("winsorize_quantile does not accept mad_scale")
+            lower = 0.01 if self.lower_quantile is None else self.lower_quantile
+            upper = 0.99 if self.upper_quantile is None else self.upper_quantile
+            if lower >= upper:
+                raise ValueError("lower_quantile must be below upper_quantile")
+            object.__setattr__(self, "lower_quantile", lower)
+            object.__setattr__(self, "upper_quantile", upper)
+        elif any(
+            value is not None
+            for value in (self.mad_scale, self.lower_quantile, self.upper_quantile)
+        ):
+            raise ValueError(f"{self.kind.value} does not accept transform parameters")
+        return self
+
+
+class CompositeFactorTerm(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    factor: FactorVersionRef
+    weight: float = 1.0
+    transform: CompositeTransformSpec = Field(default_factory=CompositeTransformSpec)
+
+    @field_validator("weight")
+    @classmethod
+    def finite_weight(cls, value: float) -> float:
+        if not math.isfinite(value):
+            raise ValueError("composite weights must be finite")
+        return value
+
+
+class CompositeFilterPolicy(BaseModel):
+    """Whitelisted cross-sectional eligibility filters."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    minimum_factor_coverage: float = Field(default=0.0, ge=0.0, le=1.0)
+    minimum_market_cap_log: float | None = None
+    maximum_market_cap_log: float | None = None
+    include_industries: tuple[str, ...] = ()
+    exclude_industries: tuple[str, ...] = ()
+    minimum_listing_days: StrictInt | None = Field(default=None, ge=0)
+    exclude_st: bool = False
+    exclude_delisting: bool = False
+    exclude_suspended: bool = False
+
+    @field_validator("minimum_market_cap_log", "maximum_market_cap_log")
+    @classmethod
+    def finite_market_cap_bound(cls, value: float | None) -> float | None:
+        if value is not None and not math.isfinite(value):
+            raise ValueError("market-cap filter bounds must be finite")
+        return value
+
+    @field_validator("include_industries", "exclude_industries")
+    @classmethod
+    def validate_industries(cls, values: tuple[str, ...]) -> tuple[str, ...]:
+        if len(set(values)) != len(values):
+            raise ValueError("industry filters must be unique")
+        if any(not value.strip() or value != value.strip() for value in values):
+            raise ValueError("industry filters must be non-blank and trimmed")
+        return values
+
+    @model_validator(mode="after")
+    def validate_filter_bounds(self) -> "CompositeFilterPolicy":
+        if (
+            self.minimum_market_cap_log is not None
+            and self.maximum_market_cap_log is not None
+            and self.minimum_market_cap_log > self.maximum_market_cap_log
+        ):
+            raise ValueError("minimum_market_cap_log cannot exceed maximum_market_cap_log")
+        overlap = set(self.include_industries) & set(self.exclude_industries)
+        if overlap:
+            raise ValueError(f"industries cannot be both included and excluded: {sorted(overlap)}")
+        return self
+
+
+class CompositeDefinition(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    terms: tuple[CompositeFactorTerm, ...] = Field(min_length=1, max_length=50)
+    auto_direction: bool = False
+    neutralize: CompositeNeutralizeKind = CompositeNeutralizeKind.NONE
+    arithmetic: CompositeArithmeticKind = CompositeArithmeticKind.WEIGHTED_SUM
+    missing: CompositeMissingKind = CompositeMissingKind.DROP_SYMBOL
+    filters: CompositeFilterPolicy = Field(default_factory=CompositeFilterPolicy)
+
+    @model_validator(mode="after")
+    def validate_terms(self) -> "CompositeDefinition":
+        factor_ids = [term.factor.factor_id for term in self.terms]
+        if len(set(factor_ids)) != len(factor_ids):
+            raise ValueError("composite factor references must be unique")
+        if sum(abs(term.weight) for term in self.terms) == 0:
+            raise ValueError("at least one composite weight must be non-zero")
+        return self
+
+
+class CompositeCreateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    name: str = Field(min_length=1, max_length=120)
+    description: str = Field(default="", max_length=2_000)
+    market: Market
+    definition: CompositeDefinition
+
+    @field_validator("name", "description")
+    @classmethod
+    def trim_composite_text(cls, value: str) -> str:
+        if value != value.strip():
+            raise ValueError("composite text fields must be trimmed")
+        return value
+
+
+class CompositeUpdateRequest(CompositeCreateRequest):
+    pass
+
+
+class CompositeValidateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    market: Market
+    definition: CompositeDefinition
+
+
+class CompositeDependencyVersion(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    factor_id: str = Field(pattern=r"^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$")
+    version: StrictInt = Field(ge=1)
+    params: dict[str, Any]
+    definition_checksum: str = Field(pattern=r"^[0-9a-f]{64}$")
+    direction: FactorDirection
+    effective_multiplier: Literal[-1, 1]
+
+
+class CompositeValidationIssue(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    code: str
+    message: str
+    factor_id: str | None = None
+
+
+class CompositeValidationResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    valid: bool
+    issues: list[CompositeValidationIssue] = Field(default_factory=list)
+    normalized_definition: CompositeDefinition | None = None
+    dependencies: tuple[CompositeDependencyVersion, ...] = ()
+    definition_checksum: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+
+
+class CompositeFactorResource(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    composite_id: str = Field(pattern=r"^[0-9a-f]{32}$")
+    user_id: str = Field(min_length=1)
+    version: StrictInt = Field(ge=1)
+    status: CompositeStatus
+    name: str = Field(min_length=1, max_length=120)
+    description: str = Field(default="", max_length=2_000)
+    market: Market
+    definition: CompositeDefinition
+    dependencies: tuple[CompositeDependencyVersion, ...]
+    definition_checksum: str = Field(pattern=r"^[0-9a-f]{64}$")
+    created_at: datetime
+    updated_at: datetime
+    published_at: datetime | None = None
+
+    @field_validator("created_at", "updated_at", "published_at")
+    @classmethod
+    def normalize_composite_timestamps(
+        cls, value: datetime | None
+    ) -> datetime | None:
+        if value is None:
+            return None
+        if value.tzinfo is None or value.utcoffset() is None:
+            raise ValueError("composite timestamps must be timezone-aware")
+        return value.astimezone(timezone.utc)
+
+    @model_validator(mode="after")
+    def validate_publication_state(self) -> "CompositeFactorResource":
+        if self.status == CompositeStatus.PUBLISHED and self.published_at is None:
+            raise ValueError("published composite requires published_at")
+        if self.status == CompositeStatus.DRAFT and self.published_at is not None:
+            raise ValueError("draft composite cannot have published_at")
+        weight_sum = math.fsum(abs(term.weight) for term in self.definition.terms)
+        if not math.isclose(weight_sum, 1.0, rel_tol=0.0, abs_tol=1e-12):
+            raise ValueError("persisted composite weights must have absolute sum 1")
+        term_ids = tuple(term.factor.factor_id for term in self.definition.terms)
+        dependency_ids = tuple(item.factor_id for item in self.dependencies)
+        if dependency_ids != term_ids:
+            raise ValueError("persisted composite dependencies must match term order")
+        for dependency in self.dependencies:
+            expected_multiplier = (
+                -1
+                if self.definition.auto_direction
+                and dependency.direction == FactorDirection.NEGATIVE
+                else 1
+            )
+            if dependency.effective_multiplier != expected_multiplier:
+                raise ValueError("persisted composite direction resolution is inconsistent")
+        expected_checksum = hashlib.sha256(
+            _stable_json(
+                {
+                    "market": self.market.value,
+                    "definition": self.definition.model_dump(mode="json"),
+                    "dependencies": [
+                        item.model_dump(mode="json") for item in self.dependencies
+                    ],
+                }
+            ).encode("utf-8")
+        ).hexdigest()
+        if self.definition_checksum != expected_checksum:
+            raise ValueError("composite definition_checksum does not match content")
+        return self
+
+
+class CompositeScoreRow(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    symbol: str
+    trade_date: date | None = None
+    raw_score: float
+    normalized_score: float | None = None
+    rank: float | None = Field(default=None, ge=0.0, le=1.0)
+    coverage_ratio: float = Field(ge=0.0, le=1.0)
+    contributions: dict[str, float]
+
+
+class CompositeEvaluationResult(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    rows: list[CompositeScoreRow]
+    eligible_symbols: int = Field(ge=0)
+    filtered_symbols: int = Field(ge=0)
+
+
 def _stable_json(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
