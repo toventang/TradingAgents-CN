@@ -22,6 +22,7 @@ def _normalize_utc(value: Optional[datetime]) -> Optional[datetime]:
 
 class DomainTaskType(str, Enum):
     FACTOR_COMPUTE = "factor_compute"
+    FACTOR_ANALYSIS = "factor_analysis"
     STRATEGY_RUN = "strategy_run"
     BACKTEST = "backtest"
     ALERT_EVAL = "alert_eval"

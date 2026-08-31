@@ -11,6 +11,7 @@ from pymongo.errors import DuplicateKeyError
 
 from app.core.database import get_mongo_db
 from app.models.factor import (
+    FactorAnalysisResult,
     FactorComputeRequest,
     FactorJob,
     FactorJobStatus,
@@ -30,17 +31,24 @@ class FactorSnapshotConflict(RuntimeError):
     """An immutable value row or snapshot disagrees with persisted content."""
 
 
+class FactorAnalysisConflict(RuntimeError):
+    """An immutable analysis ID disagrees with persisted result content."""
+
+
 class FactorRepository:
     COLLECTION = "factor_definitions"
     JOBS_COLLECTION = "factor_jobs"
     SNAPSHOTS_COLLECTION = "factor_snapshots"
     VALUES_COLLECTION = "factor_values"
+    ANALYSIS_COLLECTION = "factor_analysis_results"
 
     def __init__(self, db=None, registry: FactorRegistry | None = None):
         self._db = db
         self._registry = registry or global_factor_registry
         self._compute_indexes_ready = False
         self._compute_index_lock = asyncio.Lock()
+        self._analysis_indexes_ready = False
+        self._analysis_index_lock = asyncio.Lock()
 
     def get_db(self):
         return self._db if self._db is not None else get_mongo_db()
@@ -119,6 +127,32 @@ class FactorRepository:
                 name="factor_value_symbol_date",
             )
             self._compute_indexes_ready = True
+
+    async def ensure_analysis_indexes(self) -> None:
+        if self._analysis_indexes_ready:
+            return
+        async with self._analysis_index_lock:
+            if self._analysis_indexes_ready:
+                return
+            collection = self.get_db()[self.ANALYSIS_COLLECTION]
+            await collection.create_index(
+                [("analysis_id", ASCENDING)],
+                unique=True,
+                name="factor_analysis_id_unique",
+            )
+            await collection.create_index(
+                [
+                    ("user_id", ASCENDING),
+                    ("request_checksum", ASCENDING),
+                ],
+                unique=True,
+                name="factor_analysis_owner_request_unique",
+            )
+            await collection.create_index(
+                [("user_id", ASCENDING), ("created_at", DESCENDING)],
+                name="factor_analysis_owner_created",
+            )
+            self._analysis_indexes_ready = True
 
     async def sync_definitions(self) -> int:
         """Insert missing active metadata and reject in-place version changes."""
@@ -487,6 +521,91 @@ class FactorRepository:
             {"snapshot_id": snapshot_id, "user_id": user_id}
         )
         return None if document is None else _parse_model(FactorSnapshot, document)
+
+    async def load_analysis_inputs(
+        self,
+        *,
+        snapshot_ids: Iterable[str],
+        user_id: str,
+        include_values: bool = True,
+    ) -> tuple[tuple[FactorSnapshot, ...], list[dict[str, Any]]]:
+        """Load only owner-visible ready snapshots and their immutable rows."""
+
+        snapshots: list[FactorSnapshot] = []
+        rows: list[dict[str, Any]] = []
+        snapshot_collection = self.get_db()[self.SNAPSHOTS_COLLECTION]
+        value_collection = self.get_db()[self.VALUES_COLLECTION]
+        for snapshot_id in snapshot_ids:
+            document = await snapshot_collection.find_one(
+                {
+                    "snapshot_id": snapshot_id,
+                    "user_id": user_id,
+                    "status": FactorSnapshotStatus.READY.value,
+                }
+            )
+            if document is None:
+                continue
+            snapshots.append(_parse_model(FactorSnapshot, document))
+            if not include_values:
+                continue
+            cursor = value_collection.find(
+                {"snapshot_id": snapshot_id, "user_id": user_id}
+            ).sort(
+                [("symbol", ASCENDING), ("trade_date", ASCENDING)]
+            )
+            documents = await cursor.to_list(length=None)
+            for value_document in documents:
+                value_document.pop("_id", None)
+                rows.append(value_document)
+        snapshots.sort(key=lambda item: (item.trade_date, item.snapshot_id))
+        rows.sort(key=lambda item: (str(item.get("trade_date")), str(item.get("symbol"))))
+        return tuple(snapshots), rows
+
+    async def save_analysis_result(
+        self, result: FactorAnalysisResult
+    ) -> FactorAnalysisResult:
+        """Idempotently publish one immutable analysis result."""
+
+        await self.ensure_analysis_indexes()
+        collection = self.get_db()[self.ANALYSIS_COLLECTION]
+        key = {"analysis_id": result.analysis_id, "user_id": result.user_id}
+        existing = await collection.find_one(key)
+        if existing is not None:
+            parsed = _parse_model(FactorAnalysisResult, existing)
+            if parsed.result_checksum != result.result_checksum:
+                raise FactorAnalysisConflict(
+                    "analysis ID already contains different immutable content"
+                )
+            return parsed
+        try:
+            await collection.update_one(
+                key,
+                {"$setOnInsert": result.model_dump(mode="json")},
+                upsert=True,
+            )
+        except DuplicateKeyError:
+            pass
+        document = await collection.find_one(key)
+        if document is None:
+            raise RuntimeError("factor analysis upsert did not persist a document")
+        parsed = _parse_model(FactorAnalysisResult, document)
+        if parsed.result_checksum != result.result_checksum:
+            raise FactorAnalysisConflict(
+                "analysis ID already contains different immutable content"
+            )
+        return parsed
+
+    async def get_analysis_result(
+        self, analysis_id: str, *, user_id: str
+    ) -> FactorAnalysisResult | None:
+        document = await self.get_db()[self.ANALYSIS_COLLECTION].find_one(
+            {"analysis_id": analysis_id, "user_id": user_id}
+        )
+        return (
+            None
+            if document is None
+            else _parse_model(FactorAnalysisResult, document)
+        )
 
     async def _update_job(
         self, job_id: str, values: dict[str, Any], *, user_id: str

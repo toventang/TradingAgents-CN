@@ -10,6 +10,9 @@ from pymongo.errors import PyMongoError
 
 from app.core.database import get_mongo_db
 from app.models.factor import (
+    FactorAnalysisAccepted,
+    FactorAnalysisRequest,
+    FactorAnalysisResult,
     FactorCategory,
     FactorComputeAccepted,
     FactorComputeApiRequest,
@@ -34,6 +37,11 @@ from app.services.factors.api_service import (
     FactorApiValidationError,
     factor_feature_enabled,
 )
+from app.services.factors.analysis import (
+    FactorAnalysisApiService,
+    FactorAnalysisError,
+    FactorAnalysisNotFound,
+)
 
 
 router = APIRouter(prefix="/factors", tags=["factors"])
@@ -42,6 +50,14 @@ router = APIRouter(prefix="/factors", tags=["factors"])
 def get_factor_api_service() -> FactorApiService:
     database = get_mongo_db()
     return FactorApiService(
+        factor_repository=FactorRepository(database),
+        task_repository=DomainTaskRepository(database),
+    )
+
+
+def get_factor_analysis_api_service() -> FactorAnalysisApiService:
+    database = get_mongo_db()
+    return FactorAnalysisApiService(
         factor_repository=FactorRepository(database),
         task_repository=DomainTaskRepository(database),
     )
@@ -216,6 +232,56 @@ async def list_factor_values(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=_error("FACTOR_SNAPSHOT_NOT_FOUND", "Ready factor snapshot was not found"),
+        ) from exc
+    except PyMongoError as exc:
+        _raise_store_unavailable(exc)
+
+
+@router.post(
+    "/analyze",
+    response_model=FactorAnalysisAccepted,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def create_factor_analysis(
+    payload: FactorAnalysisRequest,
+    _feature: None = Depends(require_factor_feature),
+    current_user: dict = Depends(get_current_user),
+    service: FactorAnalysisApiService = Depends(get_factor_analysis_api_service),
+) -> FactorAnalysisAccepted:
+    try:
+        return await service.create(user_id=current_user["id"], request=payload)
+    except FactorAnalysisError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail={"code": exc.code, "message": str(exc), "details": exc.details},
+        ) from exc
+    except IdempotencyConflictError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=_error(exc.code, "Factor analysis idempotency conflict"),
+        ) from exc
+    except PyMongoError as exc:
+        _raise_store_unavailable(exc)
+
+
+@router.get("/analysis/{analysis_id}", response_model=FactorAnalysisResult)
+async def get_factor_analysis(
+    analysis_id: str,
+    _feature: None = Depends(require_factor_feature),
+    current_user: dict = Depends(get_current_user),
+    service: FactorAnalysisApiService = Depends(get_factor_analysis_api_service),
+) -> FactorAnalysisResult:
+    try:
+        return await service.get_result(
+            user_id=current_user["id"], analysis_id=analysis_id
+        )
+    except FactorAnalysisNotFound as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=_error(
+                "FACTOR_ANALYSIS_NOT_FOUND",
+                "Factor analysis result was not found",
+            ),
         ) from exc
     except PyMongoError as exc:
         _raise_store_unavailable(exc)

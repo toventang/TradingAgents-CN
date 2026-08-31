@@ -9,7 +9,7 @@ import os
 import re
 from datetime import date, datetime, timezone
 from enum import Enum
-from typing import Any
+from typing import Any, Literal
 from uuid import uuid4
 
 from pydantic import (
@@ -664,6 +664,296 @@ class FactorValuePage(BaseModel):
     page: int
     page_size: int
     total: int
+
+
+class FactorAnalysisRequest(BaseModel):
+    """Immutable research request over ready, point-in-time factor snapshots."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    snapshot_ids: tuple[str, ...] = Field(min_length=1, max_length=500)
+    factor_ids: tuple[str, ...] = Field(min_length=1, max_length=50)
+    horizons: tuple[Literal[1, 5, 10, 20], ...] = (1, 5, 10, 20)
+    quantiles: Literal[5, 10] = 5
+    min_samples: StrictInt = Field(default=20, ge=2, le=1_000_000)
+    min_cross_section: StrictInt = Field(default=5, ge=2, le=10_000)
+    label_as_of: datetime
+    label_source_version: str = Field(min_length=1, max_length=200)
+    transaction_cost_bps: float = Field(default=0.0, ge=0.0, le=1_000.0)
+    correlation_threshold: float = Field(default=0.85, gt=0.0, le=1.0)
+    industry_by_symbol: dict[str, str] = Field(default_factory=dict)
+    exposure_source_version: str | None = Field(default=None, min_length=1, max_length=200)
+
+    @field_validator("snapshot_ids")
+    @classmethod
+    def validate_snapshot_ids(cls, values: tuple[str, ...]) -> tuple[str, ...]:
+        if len(set(values)) != len(values):
+            raise ValueError("snapshot_ids must be unique")
+        if any(not re.fullmatch(r"[0-9a-f]{64}", value) for value in values):
+            raise ValueError("snapshot_ids must contain SHA-256 identifiers")
+        return values
+
+    @field_validator("factor_ids")
+    @classmethod
+    def validate_factor_ids(cls, values: tuple[str, ...]) -> tuple[str, ...]:
+        if len(set(values)) != len(values):
+            raise ValueError("factor_ids must be unique")
+        if any(not re.fullmatch(r"[a-z][a-z0-9]*(?:_[a-z0-9]+)*", value) for value in values):
+            raise ValueError("factor_ids must use lower snake case")
+        return values
+
+    @field_validator("horizons")
+    @classmethod
+    def validate_horizons(
+        cls, values: tuple[Literal[1, 5, 10, 20], ...]
+    ) -> tuple[Literal[1, 5, 10, 20], ...]:
+        if not values or len(set(values)) != len(values):
+            raise ValueError("horizons must be non-empty and unique")
+        return tuple(sorted(values))
+
+    @field_validator("label_as_of")
+    @classmethod
+    def normalize_label_as_of(cls, value: datetime) -> datetime:
+        if value.tzinfo is None or value.utcoffset() is None:
+            raise ValueError("label_as_of must be timezone-aware")
+        return value.astimezone(timezone.utc)
+
+    @field_validator("label_source_version")
+    @classmethod
+    def trim_label_version(cls, value: str) -> str:
+        if value != value.strip():
+            raise ValueError("label_source_version must be trimmed")
+        return value
+
+    @field_validator("industry_by_symbol")
+    @classmethod
+    def validate_industry_map(cls, value: dict[str, str]) -> dict[str, str]:
+        if len(value) > 10_000:
+            raise ValueError("industry_by_symbol cannot exceed 10,000 symbols")
+        if any(not symbol.strip() or symbol != symbol.strip() for symbol in value):
+            raise ValueError("industry symbols must be non-blank and trimmed")
+        if any(not industry.strip() or industry != industry.strip() for industry in value.values()):
+            raise ValueError("industry values must be non-blank and trimmed")
+        return value
+
+    @model_validator(mode="after")
+    def require_exposure_version(self) -> "FactorAnalysisRequest":
+        if self.min_cross_section < self.quantiles:
+            raise ValueError(
+                "min_cross_section must be at least the requested quantile count"
+            )
+        if self.industry_by_symbol and not self.exposure_source_version:
+            raise ValueError(
+                "exposure_source_version is required with industry_by_symbol"
+            )
+        return self
+
+    @property
+    def request_checksum(self) -> str:
+        return hashlib.sha256(
+            _stable_json(self.model_dump(mode="json")).encode("utf-8")
+        ).hexdigest()
+
+
+class FactorAnalysisTaskPayload(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    analysis_id: str = Field(pattern=r"^[0-9a-f]{64}$")
+    request: FactorAnalysisRequest
+
+
+class FactorAnalysisAccepted(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    analysis_id: str = Field(pattern=r"^[0-9a-f]{64}$")
+    task_id: str
+    request_checksum: str = Field(pattern=r"^[0-9a-f]{64}$")
+    deduplicated: bool
+
+
+class FactorDistributionSummary(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    factor_id: str
+    total_observations: int = Field(ge=0)
+    valid_observations: int = Field(ge=0)
+    missing_rate: float = Field(ge=0.0, le=1.0)
+    extreme_rate: float = Field(ge=0.0, le=1.0)
+    coverage_symbols: int = Field(ge=0)
+    mean: float | None = None
+    std: float | None = None
+    minimum: float | None = None
+    p01: float | None = None
+    p25: float | None = None
+    median: float | None = None
+    p75: float | None = None
+    p99: float | None = None
+    maximum: float | None = None
+
+
+class FactorTimePoint(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    factor_id: str
+    trade_date: date
+    mean: float | None = None
+    median: float | None = None
+    std: float | None = None
+    valid_observations: int = Field(ge=0)
+    missing_rate: float = Field(ge=0.0, le=1.0)
+
+
+class FactorDailyIC(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    trade_date: date
+    sample_count: int = Field(ge=0)
+    pearson: float | None = Field(default=None, ge=-1.0, le=1.0)
+    rank: float | None = Field(default=None, ge=-1.0, le=1.0)
+
+
+class FactorICMetric(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    factor_id: str
+    horizon: Literal[1, 5, 10, 20]
+    sample_count: int = Field(ge=0)
+    period_count: int = Field(ge=0)
+    sample_start: date | None = None
+    sample_end: date | None = None
+    pearson_mean: float | None = Field(default=None, ge=-1.0, le=1.0)
+    pearson_std: float | None = Field(default=None, ge=0.0)
+    pearson_icir: float | None = None
+    pearson_positive_ratio: float | None = Field(default=None, ge=0.0, le=1.0)
+    rank_mean: float | None = Field(default=None, ge=-1.0, le=1.0)
+    rank_std: float | None = Field(default=None, ge=0.0)
+    rank_icir: float | None = None
+    rank_positive_ratio: float | None = Field(default=None, ge=0.0, le=1.0)
+    daily: list[FactorDailyIC] = Field(default_factory=list)
+
+
+class FactorQuantileMetric(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    factor_id: str
+    horizon: Literal[1, 5, 10, 20]
+    quantiles: Literal[5, 10]
+    sample_count: int = Field(ge=0)
+    returns: dict[str, float | None]
+    monotonicity: float | None = Field(default=None, ge=-1.0, le=1.0)
+    gross_long_short_return: float | None = None
+    net_long_short_return: float | None = None
+
+
+class FactorTurnoverMetric(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    factor_id: str
+    quantiles: Literal[5, 10]
+    period_count: int = Field(ge=0)
+    top_turnover: float | None = Field(default=None, ge=0.0, le=1.0)
+    bottom_turnover: float | None = Field(default=None, ge=0.0, le=1.0)
+    long_short_turnover: float | None = Field(default=None, ge=0.0, le=2.0)
+
+
+class FactorCorrelationMetric(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    factor_a: str
+    factor_b: str
+    correlation: float | None = Field(default=None, ge=-1.0, le=1.0)
+    sample_count: int = Field(ge=0)
+    period_count: int = Field(ge=0)
+
+
+class FactorCorrelationWarning(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    factor_a: str
+    factor_b: str
+    correlation: float = Field(ge=-1.0, le=1.0)
+    threshold: float = Field(gt=0.0, le=1.0)
+
+
+class FactorExposureMetric(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    factor_id: str
+    industry_exposure: dict[str, float | None] = Field(default_factory=dict)
+    industry_sample_counts: dict[str, int] = Field(default_factory=dict)
+    market_cap_correlation: float | None = Field(default=None, ge=-1.0, le=1.0)
+    market_cap_sample_count: int = Field(default=0, ge=0)
+    beta_correlation: float | None = Field(default=None, ge=-1.0, le=1.0)
+    beta_sample_count: int = Field(default=0, ge=0)
+
+
+class FactorDecayMetric(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    factor_id: str
+    rank_ic_by_horizon: dict[str, float | None]
+    pearson_ic_by_horizon: dict[str, float | None]
+
+
+class FactorAnalysisQualitySummary(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    snapshot_count: int = Field(ge=0)
+    row_count: int = Field(ge=0)
+    excluded_quality_values: int = Field(ge=0)
+    missing_factor_values: int = Field(ge=0)
+    missing_labels_by_horizon: dict[str, int]
+    label_source_versions: tuple[str, ...]
+
+
+class FactorAnalysisResult(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    analysis_id: str = Field(pattern=r"^[0-9a-f]{64}$")
+    user_id: str = Field(min_length=1)
+    task_id: str = Field(min_length=1)
+    request_checksum: str = Field(pattern=r"^[0-9a-f]{64}$")
+    request: FactorAnalysisRequest
+    market: Market
+    universe_snapshot_id: str
+    feature_start: date
+    feature_end: date
+    feature_as_of_start: datetime
+    feature_as_of_end: datetime
+    factor_set_checksums: dict[str, str]
+    source_versions: dict[str, tuple[str, ...]]
+    transaction_cost_included: bool
+    distributions: list[FactorDistributionSummary]
+    time_series: list[FactorTimePoint]
+    ic: list[FactorICMetric]
+    quantile_returns: list[FactorQuantileMetric]
+    turnover: list[FactorTurnoverMetric]
+    correlations: list[FactorCorrelationMetric]
+    correlation_warnings: list[FactorCorrelationWarning]
+    exposures: list[FactorExposureMetric]
+    decay: list[FactorDecayMetric]
+    quality: FactorAnalysisQualitySummary
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    result_checksum: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+
+    @field_validator("feature_as_of_start", "feature_as_of_end", "created_at")
+    @classmethod
+    def normalize_result_timestamps(cls, value: datetime) -> datetime:
+        if value.tzinfo is None or value.utcoffset() is None:
+            raise ValueError("analysis timestamps must be timezone-aware")
+        return value.astimezone(timezone.utc)
+
+    @model_validator(mode="after")
+    def validate_or_set_result_checksum(self) -> "FactorAnalysisResult":
+        expected = hashlib.sha256(
+            _stable_json(self.model_dump(mode="json", exclude={"result_checksum"})).encode(
+                "utf-8"
+            )
+        ).hexdigest()
+        if self.result_checksum is not None and self.result_checksum != expected:
+            raise ValueError("result_checksum does not match factor analysis content")
+        object.__setattr__(self, "result_checksum", expected)
+        return self
 
 
 def _stable_json(value: Any) -> str:
