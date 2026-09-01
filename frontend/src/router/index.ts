@@ -91,6 +91,43 @@ const routes: RouteRecordRaw[] = [
       }
     ]
   },
+  {
+    path: '/strategies',
+    name: 'Strategies',
+    component: () => import('@/layouts/BasicLayout.vue'),
+    meta: {
+      title: '策略中心',
+      icon: 'SetUp',
+      requiresAuth: true,
+      transition: 'slide-up'
+    },
+    children: [
+      {
+        path: '',
+        name: 'StrategyCenter',
+        component: () => import('@/views/Strategies/StrategyCenter.vue'),
+        meta: { title: '策略中心', requiresAuth: true }
+      },
+      {
+        path: 'new',
+        name: 'StrategyCreate',
+        component: () => import('@/views/Strategies/StrategyWizard.vue'),
+        meta: { title: '新建策略', requiresAuth: true, hideInMenu: true }
+      },
+      {
+        path: ':strategyId/edit',
+        name: 'StrategyEdit',
+        component: () => import('@/views/Strategies/StrategyWizard.vue'),
+        meta: { title: '编辑策略草稿', requiresAuth: true, hideInMenu: true }
+      },
+      {
+        path: ':strategyId',
+        name: 'StrategyDetail',
+        component: () => import('@/views/Strategies/StrategyDetail.vue'),
+        meta: { title: '策略详情', requiresAuth: true, hideInMenu: true }
+      }
+    ]
+  },
 
   {
     path: '/favorites',
@@ -366,6 +403,15 @@ const routes: RouteRecordRaw[] = [
         component: () => import('@/views/Settings/UsageStatistics.vue'),
         meta: {
           title: '使用统计',
+          requiresAuth: true
+        }
+      },
+      {
+        path: 'analysis-profiles',
+        name: 'AnalysisProfiles',
+        component: () => import('@/views/Settings/AnalysisProfiles.vue'),
+        meta: {
+          title: 'AnalysisProfile',
           requiresAuth: true
         }
       },

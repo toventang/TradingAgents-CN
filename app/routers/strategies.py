@@ -298,11 +298,16 @@ async def create_strategy(
 
 @router.get("", response_model=StrategyListResponse)
 async def list_strategies(
+    include_archived: bool = Query(default=False),
     current_user: dict = Depends(get_current_user),
     service: StrategyApiService = Depends(get_strategy_api_service),
 ):
     try:
-        return StrategyListResponse(items=await service.list(user_id=current_user["id"]))
+        return StrategyListResponse(
+            items=await service.list(
+                user_id=current_user["id"], include_archived=include_archived
+            )
+        )
     except PyMongoError as exc:
         _store_unavailable(exc)
 

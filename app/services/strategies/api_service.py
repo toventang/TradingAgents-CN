@@ -61,8 +61,12 @@ class StrategyApiService:
             change_summary=request.change_summary,
         )
 
-    async def list(self, *, user_id: str) -> tuple[Strategy, ...]:
-        owned = await self.repository.list_strategies(user_id=user_id, limit=500)
+    async def list(
+        self, *, user_id: str, include_archived: bool = False
+    ) -> tuple[Strategy, ...]:
+        owned = await self.repository.list_strategies(
+            user_id=user_id, include_archived=include_archived, limit=500
+        )
         system = await self.repository.list_strategies(
             user_id=SYSTEM_USER_ID, limit=500
         )

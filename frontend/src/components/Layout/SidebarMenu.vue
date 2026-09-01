@@ -32,6 +32,11 @@
       <template #title>任务中心</template>
     </el-menu-item>
 
+    <el-menu-item index="/strategies">
+      <el-icon><SetUp /></el-icon>
+      <template #title>策略中心</template>
+    </el-menu-item>
+
     <el-sub-menu index="/factors">
       <template #title>
         <el-icon><DataAnalysis /></el-icon>
@@ -78,6 +83,7 @@
         <el-menu-item index="/settings">通用设置</el-menu-item>
         <el-menu-item index="/settings?tab=appearance">外观设置</el-menu-item>
         <el-menu-item index="/settings?tab=analysis">分析偏好</el-menu-item>
+        <el-menu-item index="/settings/analysis-profiles">AnalysisProfile</el-menu-item>
         <el-menu-item index="/settings?tab=notifications">通知设置</el-menu-item>
         <el-menu-item index="/settings?tab=security">安全设置</el-menu-item>
       </el-sub-menu>
@@ -120,6 +126,7 @@ import {
   Star,
   List,
   DataAnalysis,
+  SetUp,
   /* Document 移除：不再使用顶级分析报告菜单图标 */
   Setting,
   InfoFilled,
