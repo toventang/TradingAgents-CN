@@ -10,6 +10,11 @@ from pymongo import ASCENDING, DESCENDING, ReturnDocument
 from pymongo.errors import DuplicateKeyError
 
 from app.core.database import get_mongo_db
+from app.models.analysis import (
+    AnalysisProfile,
+    AnalysisProfileVersion,
+    AnalysisProfileVersionStatus,
+)
 from app.models.strategy import (
     SYSTEM_USER_ID,
     Strategy,
@@ -38,6 +43,8 @@ class StrategyRepository:
     VERSIONS_COLLECTION = "strategy_versions"
     UNIVERSES_COLLECTION = "universe_snapshots"
     SIGNALS_COLLECTION = "strategy_signals"
+    ANALYSIS_PROFILES_COLLECTION = "analysis_profiles"
+    ANALYSIS_PROFILE_VERSIONS_COLLECTION = "analysis_profile_versions"
 
     def __init__(self, db=None):
         self._db = db
@@ -57,6 +64,10 @@ class StrategyRepository:
             versions = self.get_db()[self.VERSIONS_COLLECTION]
             universes = self.get_db()[self.UNIVERSES_COLLECTION]
             signals = self.get_db()[self.SIGNALS_COLLECTION]
+            analysis_profiles = self.get_db()[self.ANALYSIS_PROFILES_COLLECTION]
+            analysis_profile_versions = self.get_db()[
+                self.ANALYSIS_PROFILE_VERSIONS_COLLECTION
+            ]
 
             await strategies.create_index(
                 [("strategy_id", ASCENDING)],
@@ -135,6 +146,29 @@ class StrategyRepository:
                     ("signal_date", DESCENDING),
                 ],
                 name="strategy_signal_symbol_date",
+            )
+            await analysis_profiles.create_index(
+                [("profile_id", ASCENDING)],
+                unique=True,
+                name="analysis_profile_id_unique",
+            )
+            await analysis_profiles.create_index(
+                [("user_id", ASCENDING), ("updated_at", DESCENDING)],
+                name="analysis_profile_owner_updated",
+            )
+            await analysis_profile_versions.create_index(
+                [("profile_id", ASCENDING), ("version", ASCENDING)],
+                unique=True,
+                name="analysis_profile_version_number_unique",
+            )
+            await analysis_profile_versions.create_index(
+                [("profile_version_id", ASCENDING)],
+                unique=True,
+                name="analysis_profile_version_id_unique",
+            )
+            await analysis_profile_versions.create_index(
+                [("user_id", ASCENDING), ("status", ASCENDING)],
+                name="analysis_profile_version_owner_state",
             )
             self._indexes_ready = True
 
@@ -455,6 +489,222 @@ class StrategyRepository:
         if document is None:
             raise StrategyConflict("only an owner-visible published version can be deprecated")
         return _parse_model(StrategyVersion, document)
+
+    async def create_analysis_profile(
+        self, profile: AnalysisProfile, initial_version: AnalysisProfileVersion
+    ) -> tuple[AnalysisProfile, AnalysisProfileVersion]:
+        """Create an owner-scoped profile and its first draft."""
+
+        await self.ensure_indexes()
+        if (
+            initial_version.profile_id != profile.profile_id
+            or initial_version.user_id != profile.user_id
+            or initial_version.version != 1
+            or initial_version.status != AnalysisProfileVersionStatus.DRAFT
+            or profile.current_draft_version_id
+            != initial_version.profile_version_id
+            or profile.latest_published_version_id is not None
+            or profile.version_sequence != 1
+        ):
+            raise ValueError("invalid initial AnalysisProfile/version pair")
+        profiles = self.get_db()[self.ANALYSIS_PROFILES_COLLECTION]
+        versions = self.get_db()[self.ANALYSIS_PROFILE_VERSIONS_COLLECTION]
+        try:
+            await profiles.insert_one(profile.model_dump(mode="json"))
+        except DuplicateKeyError as exc:
+            raise StrategyConflict("analysis profile ID already exists") from exc
+        try:
+            await versions.insert_one(initial_version.model_dump(mode="json"))
+        except Exception as exc:
+            await profiles.delete_one(
+                {"profile_id": profile.profile_id, "user_id": profile.user_id}
+            )
+            if not isinstance(exc, DuplicateKeyError):
+                raise
+            raise StrategyConflict("initial analysis profile version already exists") from exc
+        return profile, initial_version
+
+    async def get_analysis_profile(
+        self,
+        profile_id: str,
+        *,
+        user_id: str,
+        include_archived: bool = False,
+    ) -> AnalysisProfile | None:
+        query: dict[str, object] = {"profile_id": profile_id, "user_id": user_id}
+        if not include_archived:
+            query["archived_at"] = None
+        document = await self.get_db()[self.ANALYSIS_PROFILES_COLLECTION].find_one(query)
+        return None if document is None else _parse_model(AnalysisProfile, document)
+
+    async def get_analysis_profile_version(
+        self, profile_version_id: str, *, user_id: str
+    ) -> AnalysisProfileVersion | None:
+        document = await self.get_db()[
+            self.ANALYSIS_PROFILE_VERSIONS_COLLECTION
+        ].find_one({"profile_version_id": profile_version_id, "user_id": user_id})
+        return None if document is None else _parse_model(AnalysisProfileVersion, document)
+
+    async def list_analysis_profile_versions(
+        self, profile_id: str, *, user_id: str
+    ) -> tuple[AnalysisProfileVersion, ...]:
+        cursor = self.get_db()[self.ANALYSIS_PROFILE_VERSIONS_COLLECTION].find(
+            {"profile_id": profile_id, "user_id": user_id}
+        ).sort([("version", ASCENDING)])
+        documents = await cursor.to_list(length=None)
+        return tuple(_parse_model(AnalysisProfileVersion, item) for item in documents)
+
+    async def replace_analysis_profile_draft(
+        self,
+        replacement: AnalysisProfileVersion,
+        *,
+        expected_checksum: str,
+    ) -> AnalysisProfileVersion:
+        if replacement.status != AnalysisProfileVersionStatus.DRAFT:
+            raise ValueError("replacement profile version must remain a draft")
+        document = await self.get_db()[
+            self.ANALYSIS_PROFILE_VERSIONS_COLLECTION
+        ].find_one_and_update(
+            {
+                "profile_version_id": replacement.profile_version_id,
+                "profile_id": replacement.profile_id,
+                "user_id": replacement.user_id,
+                "status": AnalysisProfileVersionStatus.DRAFT.value,
+                "checksum": expected_checksum,
+            },
+            {"$set": replacement.model_dump(mode="json")},
+            return_document=ReturnDocument.AFTER,
+        )
+        if document is None:
+            raise StrategyConflict(
+                "analysis profile draft changed, was published, or is not owner-visible"
+            )
+        return _parse_model(AnalysisProfileVersion, document)
+
+    async def publish_analysis_profile_version(
+        self,
+        published: AnalysisProfileVersion,
+        *,
+        expected_draft_checksum: str,
+        updated_at: datetime,
+    ) -> AnalysisProfileVersion:
+        if published.status != AnalysisProfileVersionStatus.PUBLISHED:
+            raise ValueError("published profile replacement must use published status")
+        versions = self.get_db()[self.ANALYSIS_PROFILE_VERSIONS_COLLECTION]
+        document = await versions.find_one_and_update(
+            {
+                "profile_version_id": published.profile_version_id,
+                "profile_id": published.profile_id,
+                "user_id": published.user_id,
+                "status": AnalysisProfileVersionStatus.DRAFT.value,
+                "checksum": expected_draft_checksum,
+            },
+            {"$set": published.model_dump(mode="json")},
+            return_document=ReturnDocument.AFTER,
+        )
+        if document is None:
+            existing = await versions.find_one(
+                {
+                    "profile_version_id": published.profile_version_id,
+                    "user_id": published.user_id,
+                }
+            )
+            if existing is not None:
+                parsed = _parse_model(AnalysisProfileVersion, existing)
+                if (
+                    parsed.status == AnalysisProfileVersionStatus.PUBLISHED
+                    and parsed.checksum == published.checksum
+                ):
+                    return parsed
+            raise StrategyConflict("analysis profile draft changed or was already published")
+        header = await self.get_db()[
+            self.ANALYSIS_PROFILES_COLLECTION
+        ].find_one_and_update(
+            {
+                "profile_id": published.profile_id,
+                "user_id": published.user_id,
+                "current_draft_version_id": published.profile_version_id,
+                "archived_at": None,
+            },
+            {
+                "$set": {
+                    "current_draft_version_id": None,
+                    "latest_published_version_id": published.profile_version_id,
+                    "updated_at": updated_at,
+                }
+            },
+            return_document=ReturnDocument.AFTER,
+        )
+        if header is None:
+            raise StrategyConflict("analysis profile header changed during publication")
+        return _parse_model(AnalysisProfileVersion, document)
+
+    async def reserve_next_analysis_profile_draft(
+        self,
+        *,
+        profile_id: str,
+        user_id: str,
+        expected_version_sequence: int,
+        profile_version_id: str,
+        updated_at: datetime,
+    ) -> int:
+        document = await self.get_db()[
+            self.ANALYSIS_PROFILES_COLLECTION
+        ].find_one_and_update(
+            {
+                "profile_id": profile_id,
+                "user_id": user_id,
+                "archived_at": None,
+                "current_draft_version_id": None,
+                "version_sequence": expected_version_sequence,
+            },
+            {
+                "$inc": {"version_sequence": 1},
+                "$set": {
+                    "current_draft_version_id": profile_version_id,
+                    "updated_at": updated_at,
+                },
+            },
+            return_document=ReturnDocument.AFTER,
+        )
+        if document is None:
+            raise StrategyConflict("analysis profile changed or already has a draft")
+        return int(document["version_sequence"])
+
+    async def insert_reserved_analysis_profile_version(
+        self, version: AnalysisProfileVersion
+    ) -> AnalysisProfileVersion:
+        if version.status != AnalysisProfileVersionStatus.DRAFT:
+            raise ValueError("only draft profile versions can fill a reservation")
+        try:
+            await self.get_db()[self.ANALYSIS_PROFILE_VERSIONS_COLLECTION].insert_one(
+                version.model_dump(mode="json")
+            )
+        except DuplicateKeyError as exc:
+            raise StrategyConflict("analysis profile version already exists") from exc
+        return version
+
+    async def release_analysis_profile_draft_reservation(
+        self,
+        *,
+        profile_id: str,
+        user_id: str,
+        profile_version_id: str,
+        reserved_version: int,
+    ) -> None:
+        await self.get_db()[self.ANALYSIS_PROFILES_COLLECTION].find_one_and_update(
+            {
+                "profile_id": profile_id,
+                "user_id": user_id,
+                "current_draft_version_id": profile_version_id,
+                "version_sequence": reserved_version,
+            },
+            {
+                "$inc": {"version_sequence": -1},
+                "$set": {"current_draft_version_id": None},
+            },
+            return_document=ReturnDocument.AFTER,
+        )
 
     async def save_universe_snapshot(self, snapshot: UniverseSnapshot) -> UniverseSnapshot:
         await self.ensure_indexes()
