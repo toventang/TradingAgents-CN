@@ -1,8 +1,8 @@
-"""Point-in-time input contracts for deterministic daily backtests.
+"""Point-in-time, execution, and performance contracts for backtests.
 
 J30 freezes historical inputs and J31 defines transient order/fill contracts.
-Ledger persistence and performance logic remain in later tasks. Raw market
-prices remain unadjusted; adjustment data is carried separately.
+J33 defines deterministic metric outputs. Raw market prices remain unadjusted;
+adjustment data is carried separately.
 """
 
 from __future__ import annotations
@@ -712,4 +712,163 @@ class SignalConflictDecision(BaseModel):
     def prevent_exit_and_buy(self) -> "SignalConflictDecision":
         if self.exit_selected and self.buy_allowed:
             raise ValueError("exit and buy cannot both be selected for one symbol/day")
+        return self
+
+
+class BacktestPerformanceConfig(BaseModel):
+    """Published calculation conventions for one performance report."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    annualization_periods: StrictInt = Field(default=252, ge=1, le=366)
+    annual_risk_free_rate: Decimal = Field(default=Decimal("0"), gt=-1)
+    minimum_return_observations: StrictInt = Field(default=30, ge=1)
+    minimum_trade_count: StrictInt = Field(default=10, ge=1)
+
+
+class BacktestClosedLot(BaseModel):
+    """One fee-inclusive FIFO match between a buy lot and a sell fill."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    closed_lot_id: str
+    symbol: str
+    buy_trade_id: str
+    sell_trade_id: str
+    buy_order_id: str
+    sell_order_id: str
+    quantity: StrictInt = Field(gt=0)
+    entry_trade_date: date
+    exit_trade_date: date
+    entry_cost: Decimal = Field(gt=0)
+    exit_proceeds: Decimal
+    pnl: Decimal
+    return_rate: Decimal
+    holding_sessions: StrictInt = Field(ge=0)
+    exit_reason: str
+
+    @model_validator(mode="after")
+    def reconcile_closed_lot(self) -> "BacktestClosedLot":
+        if self.exit_trade_date < self.entry_trade_date:
+            raise ValueError("closed lot exit cannot precede entry")
+        if self.exit_proceeds - self.entry_cost != self.pnl:
+            raise ValueError("closed lot PnL does not reconcile")
+        if abs(self.pnl / self.entry_cost - self.return_rate) > Decimal("1e-24"):
+            raise ValueError("closed lot return does not reconcile")
+        return self
+
+
+class BacktestPeriodReturn(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    period: str = Field(min_length=4, max_length=7)
+    start_date: date
+    end_date: date
+    return_rate: Decimal
+
+
+class BacktestPerformanceReport(BaseModel):
+    """Complete deterministic metric set; undefined ratios are represented by None."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    initial_equity: Decimal = Field(gt=0)
+    final_equity: Decimal = Field(gt=0)
+    return_observations: StrictInt = Field(ge=1)
+    total_return: Decimal
+    cagr: Decimal
+    mean_daily_return: Decimal
+    annualized_volatility: Decimal = Field(ge=0)
+    annual_risk_free_rate: Decimal
+    daily_risk_free_rate: Decimal
+    sharpe_ratio: Decimal | None = None
+    annualized_downside_deviation: Decimal = Field(ge=0)
+    sortino_ratio: Decimal | None = None
+    max_drawdown: Decimal = Field(le=0)
+    max_drawdown_start_date: date | None = None
+    max_drawdown_end_date: date | None = None
+    max_drawdown_recovery_date: date | None = None
+    calmar_ratio: Decimal | None = None
+
+    benchmark_observations: StrictInt = Field(ge=0)
+    benchmark_total_return: Decimal | None = None
+    relative_total_return: Decimal | None = None
+    beta: Decimal | None = None
+    annualized_alpha: Decimal | None = None
+    tracking_error: Decimal | None = Field(default=None, ge=0)
+    information_ratio: Decimal | None = None
+
+    closed_lot_count: StrictInt = Field(ge=0)
+    winning_lot_count: StrictInt = Field(ge=0)
+    losing_lot_count: StrictInt = Field(ge=0)
+    breakeven_lot_count: StrictInt = Field(ge=0)
+    win_rate: Decimal | None = None
+    loss_rate: Decimal | None = None
+    profit_loss_ratio: Decimal | None = None
+    profit_factor: Decimal | None = None
+    gross_winning_pnl: Decimal = Field(ge=0)
+    gross_losing_pnl: Decimal = Field(le=0)
+    net_closed_pnl: Decimal
+    average_closed_lot_pnl: Decimal | None = None
+    median_closed_lot_pnl: Decimal | None = None
+    average_closed_lot_return: Decimal | None = None
+    median_closed_lot_return: Decimal | None = None
+    maximum_winning_pnl: Decimal | None = None
+    maximum_losing_pnl: Decimal | None = None
+    average_holding_sessions: Decimal | None = None
+    median_holding_sessions: Decimal | None = None
+
+    total_turnover: Decimal = Field(ge=0)
+    average_daily_turnover: Decimal = Field(ge=0)
+    total_fees: Decimal = Field(ge=0)
+    total_slippage_cost: Decimal
+    fee_to_gross_profit_ratio: Decimal | None = None
+    average_gross_exposure: Decimal = Field(ge=0)
+    maximum_gross_exposure: Decimal = Field(ge=0)
+    average_net_exposure: Decimal = Field(ge=0)
+    maximum_net_exposure: Decimal = Field(ge=0)
+    average_cash_ratio: Decimal = Field(ge=0)
+    minimum_cash_ratio: Decimal = Field(ge=0)
+    maximum_cash_ratio: Decimal = Field(ge=0)
+    final_cash_ratio: Decimal = Field(ge=0)
+    maximum_stock_concentration: Decimal = Field(ge=0, le=1)
+    maximum_industry_concentration: Decimal | None = Field(default=None, ge=0, le=1)
+
+    trade_count: StrictInt = Field(ge=0)
+    rejected_order_count: StrictInt = Field(ge=0)
+    partially_filled_order_count: StrictInt = Field(ge=0)
+    monthly_returns: tuple[BacktestPeriodReturn, ...]
+    yearly_returns: tuple[BacktestPeriodReturn, ...]
+    exit_reason_distribution: dict[str, StrictInt]
+    closed_lots: tuple[BacktestClosedLot, ...]
+    warnings: tuple[str, ...]
+    formulas: dict[str, str]
+
+    @model_validator(mode="after")
+    def reconcile_performance_report(self) -> "BacktestPerformanceReport":
+        if (
+            self.winning_lot_count
+            + self.losing_lot_count
+            + self.breakeven_lot_count
+            != self.closed_lot_count
+            or len(self.closed_lots) != self.closed_lot_count
+        ):
+            raise ValueError("closed lot counts do not reconcile")
+        if self.gross_winning_pnl + self.gross_losing_pnl != self.net_closed_pnl:
+            raise ValueError("closed lot PnL aggregates do not reconcile")
+        if abs(
+            self.final_equity / self.initial_equity - 1 - self.total_return
+        ) > Decimal("1e-24"):
+            raise ValueError("total return does not reconcile")
+        if self.max_drawdown == 0 and any(
+            value is not None
+            for value in (
+                self.max_drawdown_start_date,
+                self.max_drawdown_end_date,
+                self.max_drawdown_recovery_date,
+            )
+        ):
+            raise ValueError("zero drawdown cannot have drawdown dates")
+        if self.max_drawdown < 0 and self.max_drawdown_end_date is None:
+            raise ValueError("non-zero drawdown requires a trough date")
         return self
