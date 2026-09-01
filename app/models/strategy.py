@@ -12,7 +12,7 @@ import math
 import re
 from datetime import date, datetime, timezone
 from enum import Enum
-from typing import Any
+from typing import Annotated, Any, Literal
 from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field, StrictInt, field_validator, model_validator
@@ -419,3 +419,433 @@ class StrategySignal(BaseModel):
         payload["reason_codes"] = sorted(payload["reason_codes"])
         payload["input_contributions"] = dict(sorted(payload["input_contributions"].items()))
         return _checksum(payload)
+
+
+# Closed strategy definition DSL.  No node contains executable text, import
+# names, or user-provided function references.
+
+
+class StrategyCompareOperator(str, Enum):
+    GT = "gt"
+    GTE = "gte"
+    LT = "lt"
+    LTE = "lte"
+    EQ = "eq"
+    NEQ = "neq"
+    BETWEEN = "between"
+
+
+class FactorOperand(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    kind: Literal["factor"] = "factor"
+    factor_id: str = Field(pattern=r"^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$")
+    version: StrictInt = Field(default=1, ge=1)
+    lag: StrictInt = Field(default=0, ge=0, le=252)
+
+
+class ConstantOperand(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    kind: Literal["constant"] = "constant"
+    value: float
+
+    @field_validator("value")
+    @classmethod
+    def require_finite_value(cls, value: float) -> float:
+        if not math.isfinite(value):
+            raise ValueError("constant values must be finite")
+        return value
+
+
+StrategyOperand = Annotated[
+    FactorOperand | ConstantOperand,
+    Field(discriminator="kind"),
+]
+
+
+class AllCondition(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    type: Literal["all"] = "all"
+    children: tuple["StrategyCondition", ...] = Field(min_length=1)
+
+
+class AnyCondition(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    type: Literal["any"] = "any"
+    children: tuple["StrategyCondition", ...] = Field(min_length=1)
+
+
+class NotCondition(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    type: Literal["not"] = "not"
+    child: "StrategyCondition"
+
+
+class CompareCondition(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    type: Literal["compare"] = "compare"
+    left: StrategyOperand
+    operator: StrategyCompareOperator
+    right: StrategyOperand
+    upper: StrategyOperand | None = None
+
+    @model_validator(mode="after")
+    def validate_between_shape(self) -> "CompareCondition":
+        if self.operator == StrategyCompareOperator.BETWEEN and self.upper is None:
+            raise ValueError("between requires an upper operand")
+        if self.operator != StrategyCompareOperator.BETWEEN and self.upper is not None:
+            raise ValueError("upper is only valid for between")
+        if (
+            self.operator == StrategyCompareOperator.BETWEEN
+            and isinstance(self.right, ConstantOperand)
+            and isinstance(self.upper, ConstantOperand)
+            and self.right.value > self.upper.value
+        ):
+            raise ValueError("between lower bound cannot exceed upper bound")
+        return self
+
+
+class CrossCondition(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    type: Literal["cross_up", "cross_down"]
+    left: StrategyOperand
+    right: StrategyOperand
+    periods: StrictInt = Field(default=1, ge=1, le=252)
+
+
+class RankCondition(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    type: Literal["rank"] = "rank"
+    factor: FactorOperand
+    mode: Literal["percentile", "top_n"]
+    percentile: float | None = Field(default=None, gt=0, le=1)
+    top_n: StrictInt | None = Field(default=None, ge=1, le=5000)
+    higher_is_better: bool = True
+
+    @model_validator(mode="after")
+    def validate_rank_cutoff(self) -> "RankCondition":
+        if self.mode == "percentile" and (
+            self.percentile is None or self.top_n is not None
+        ):
+            raise ValueError("percentile rank requires only percentile")
+        if self.mode == "top_n" and (self.top_n is None or self.percentile is not None):
+            raise ValueError("top_n rank requires only top_n")
+        return self
+
+
+class ChangedCondition(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    type: Literal["changed"] = "changed"
+    factor: FactorOperand
+    periods: StrictInt = Field(ge=1, le=252)
+    operator: Literal["gt", "gte", "lt", "lte"]
+    threshold: float
+
+    @field_validator("threshold")
+    @classmethod
+    def require_finite_threshold(cls, value: float) -> float:
+        if not math.isfinite(value):
+            raise ValueError("changed threshold must be finite")
+        return value
+
+
+StrategyCondition = Annotated[
+    AllCondition
+    | AnyCondition
+    | NotCondition
+    | CompareCondition
+    | CrossCondition
+    | RankCondition
+    | ChangedCondition,
+    Field(discriminator="type"),
+]
+
+
+class StrategyUniverseSpec(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    snapshot_id: str | None = Field(default=None, min_length=1, max_length=128)
+    minimum_listing_days: StrictInt = Field(default=0, ge=0, le=100_000)
+    exclude_st: bool = True
+    exclude_delisting: bool = True
+    exclude_suspended: bool = True
+    include_industries: tuple[str, ...] = ()
+    exclude_industries: tuple[str, ...] = ()
+    minimum_market_cap: float | None = Field(default=None, ge=0)
+    maximum_market_cap: float | None = Field(default=None, ge=0)
+
+    @model_validator(mode="after")
+    def validate_universe_filters(self) -> "StrategyUniverseSpec":
+        if set(self.include_industries) & set(self.exclude_industries):
+            raise ValueError("included and excluded industries cannot overlap")
+        if len(set(self.include_industries)) != len(self.include_industries):
+            raise ValueError("include_industries must be unique")
+        if len(set(self.exclude_industries)) != len(self.exclude_industries):
+            raise ValueError("exclude_industries must be unique")
+        if (
+            self.minimum_market_cap is not None
+            and self.maximum_market_cap is not None
+            and self.minimum_market_cap > self.maximum_market_cap
+        ):
+            raise ValueError("minimum_market_cap cannot exceed maximum_market_cap")
+        return self
+
+
+class StrategyDataSpec(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    frequency: Literal["daily"] = "daily"
+    adjustment: Literal["qfq", "hfq", "none"] = "qfq"
+    minimum_history: StrictInt = Field(default=1, ge=1, le=5000)
+    allowed_quality: tuple[Literal["ok", "valid"], ...] = ("ok", "valid")
+    point_in_time: Literal[True] = True
+
+    @field_validator("allowed_quality")
+    @classmethod
+    def validate_quality_values(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        if not value or len(set(value)) != len(value):
+            raise ValueError("allowed_quality must be non-empty and unique")
+        return value
+
+
+class StrategyFeatureRef(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    factor_id: str = Field(pattern=r"^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$")
+    version: StrictInt = Field(default=1, ge=1)
+    params: dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("params")
+    @classmethod
+    def validate_params_json(cls, value: dict[str, Any]) -> dict[str, Any]:
+        return _require_json_object(value, "feature params")
+
+
+class StrategyRankingFactor(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    factor: FactorOperand
+    weight: float
+    higher_is_better: bool = True
+    normalization: Literal["zscore", "rank", "robust_zscore"] = "zscore"
+
+    @field_validator("weight")
+    @classmethod
+    def validate_weight(cls, value: float) -> float:
+        if not math.isfinite(value) or value == 0:
+            raise ValueError("ranking weight must be finite and non-zero")
+        return value
+
+
+class StrategyRankingSpec(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    factors: tuple[StrategyRankingFactor, ...] = Field(min_length=1)
+    top_n: StrictInt | None = Field(default=None, ge=1, le=5000)
+    top_percent: float | None = Field(default=None, gt=0, le=1)
+    tie_breaker: Literal["symbol_asc", "symbol_desc"] = "symbol_asc"
+
+    @model_validator(mode="after")
+    def validate_selection_cutoff(self) -> "StrategyRankingSpec":
+        if (self.top_n is None) == (self.top_percent is None):
+            raise ValueError("exactly one of top_n and top_percent is required")
+        factor_keys = [
+            (item.factor.factor_id, item.factor.version) for item in self.factors
+        ]
+        if len(set(factor_keys)) != len(factor_keys):
+            raise ValueError("ranking factors must be unique")
+        return self
+
+
+class StrategyEntrySpec(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    condition: StrategyCondition | None = None
+    ranking: StrategyRankingSpec | None = None
+
+    @model_validator(mode="after")
+    def require_entry_rule(self) -> "StrategyEntrySpec":
+        if self.condition is None and self.ranking is None:
+            raise ValueError("entry requires a condition or ranking")
+        return self
+
+
+class StrategyExitSpec(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    condition: StrategyCondition | None = None
+    take_profit: float | None = Field(default=None, gt=0, le=10)
+    stop_loss: float | None = Field(default=None, gt=0, lt=1)
+    max_holding_periods: StrictInt | None = Field(default=None, ge=1, le=100_000)
+
+    @model_validator(mode="after")
+    def require_exit_rule(self) -> "StrategyExitSpec":
+        if (
+            self.condition is None
+            and self.take_profit is None
+            and self.stop_loss is None
+            and self.max_holding_periods is None
+        ):
+            raise ValueError("exit must contain at least one rule")
+        return self
+
+
+class StrategyRebalanceSpec(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    frequency: Literal["daily", "weekly", "monthly"]
+    weekday: StrictInt | None = Field(default=None, ge=0, le=4)
+    day_of_month: StrictInt | None = Field(default=None, ge=1, le=31)
+
+    @model_validator(mode="after")
+    def validate_calendar_rule(self) -> "StrategyRebalanceSpec":
+        if self.frequency == "daily" and (
+            self.weekday is not None or self.day_of_month is not None
+        ):
+            raise ValueError("daily rebalance cannot specify a calendar day")
+        if self.frequency == "weekly" and (
+            self.weekday is None or self.day_of_month is not None
+        ):
+            raise ValueError("weekly rebalance requires only weekday")
+        if self.frequency == "monthly" and (
+            self.day_of_month is None or self.weekday is not None
+        ):
+            raise ValueError("monthly rebalance requires only day_of_month")
+        return self
+
+
+class StrategyPortfolioSpec(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    weighting: Literal[
+        "equal_weight", "score_weight", "inverse_volatility", "fixed_weight"
+    ]
+    max_positions: StrictInt = Field(ge=1, le=200)
+    max_position_weight: float = Field(ge=0.01, le=1)
+    max_industry_weight: float = Field(ge=0.05, le=1)
+    min_cash_ratio: float = Field(ge=0, le=0.9)
+    volatility_factor: FactorOperand | None = None
+    fixed_weights: dict[str, float] = Field(default_factory=dict)
+    minimum_lot: StrictInt = Field(default=1, ge=1)
+    minimum_notional: float = Field(default=0, ge=0)
+
+    @model_validator(mode="after")
+    def validate_weighting_configuration(self) -> "StrategyPortfolioSpec":
+        if self.weighting == "inverse_volatility" and self.volatility_factor is None:
+            raise ValueError("inverse_volatility requires volatility_factor")
+        if self.weighting != "inverse_volatility" and self.volatility_factor is not None:
+            raise ValueError("volatility_factor is only valid for inverse_volatility")
+        if self.weighting == "fixed_weight":
+            if not self.fixed_weights:
+                raise ValueError("fixed_weight requires fixed_weights")
+            if len(self.fixed_weights) > self.max_positions:
+                raise ValueError("fixed_weights exceed max_positions")
+            if any(
+                not symbol.strip()
+                or not math.isfinite(weight)
+                or weight <= 0
+                or weight > self.max_position_weight
+                for symbol, weight in self.fixed_weights.items()
+            ):
+                raise ValueError("fixed weights must be positive and within the position cap")
+            if sum(self.fixed_weights.values()) > 1 - self.min_cash_ratio + 1e-12:
+                raise ValueError("fixed weights violate min_cash_ratio")
+        elif self.fixed_weights:
+            raise ValueError("fixed_weights are only valid for fixed_weight")
+        return self
+
+
+class StrategyExecutionSpec(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    signal_time: Literal["open", "close"]
+    execution_time: Literal["same_open", "same_close", "next_open", "next_close"]
+    price: Literal["open", "close", "vwap"]
+    slippage_bps: float = Field(default=0, ge=0, le=10_000)
+    fee_model_version: str = Field(min_length=1, max_length=128)
+
+
+class StrategyRiskSpec(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    max_drawdown_stop: float | None = Field(default=None, gt=0, lt=1)
+    volatility_target: float | None = Field(default=None, gt=0, le=5)
+    take_profit: float | None = Field(default=None, gt=0, le=10)
+    stop_loss: float | None = Field(default=None, gt=0, lt=1)
+    cooldown_periods: StrictInt = Field(default=0, ge=0, le=10_000)
+
+
+class StrategyBenchmarkSpec(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    market: Market
+    symbol: str = Field(min_length=1, max_length=64)
+
+    @field_validator("symbol")
+    @classmethod
+    def require_trimmed_symbol(cls, value: str) -> str:
+        if value != value.strip():
+            raise ValueError("benchmark symbol must be trimmed")
+        return value
+
+
+class StrategyAnalysisSpec(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    analysis_profile_version_id: str | None = Field(
+        default=None, pattern=_IDENTIFIER_PATTERN
+    )
+    skill_version_ids: tuple[str, ...] = ()
+    require_explanation: bool = False
+
+    @field_validator("skill_version_ids")
+    @classmethod
+    def validate_skill_ids(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        if len(set(value)) != len(value):
+            raise ValueError("skill_version_ids must be unique")
+        if any(not re.fullmatch(_IDENTIFIER_PATTERN, item) for item in value):
+            raise ValueError("skill_version_ids contain an invalid identifier")
+        return value
+
+
+class StrategyDefinitionDSL(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    universe: StrategyUniverseSpec
+    data: StrategyDataSpec
+    features: tuple[StrategyFeatureRef, ...] = Field(min_length=1)
+    entry: StrategyEntrySpec
+    exit: StrategyExitSpec
+    rebalance: StrategyRebalanceSpec
+    portfolio: StrategyPortfolioSpec
+    execution: StrategyExecutionSpec
+    risk: StrategyRiskSpec
+    benchmark: StrategyBenchmarkSpec
+    analysis: StrategyAnalysisSpec | None = None
+
+    @model_validator(mode="after")
+    def validate_definition_identity(self) -> "StrategyDefinitionDSL":
+        feature_keys = [(item.factor_id, item.version) for item in self.features]
+        if len(set(feature_keys)) != len(feature_keys):
+            raise ValueError("features must contain unique factor versions")
+        if self.exit.take_profit is not None and self.risk.take_profit is not None:
+            if self.exit.take_profit != self.risk.take_profit:
+                raise ValueError("exit and risk take_profit rules conflict")
+        if self.exit.stop_loss is not None and self.risk.stop_loss is not None:
+            if self.exit.stop_loss != self.risk.stop_loss:
+                raise ValueError("exit and risk stop_loss rules conflict")
+        return self
+
+
+for _condition_model in (AllCondition, AnyCondition, NotCondition):
+    _condition_model.model_rebuild(
+        _types_namespace={"StrategyCondition": StrategyCondition}
+    )
