@@ -71,6 +71,8 @@ from app.services.quotes_ingestion_service import QuotesIngestionService
 from app.routers import paper as paper_router
 from app.routers import domain_tasks as domain_tasks_router
 from app.routers import factors as factors_router
+from app.routers import strategies as strategies_router
+from app.routers import analysis_profiles as analysis_profiles_router
 
 
 def get_version() -> str:
@@ -702,6 +704,8 @@ app.include_router(screening.router, prefix="/api/screening", tags=["screening"]
 app.include_router(queue.router, prefix="/api/queue", tags=["queue"])
 app.include_router(domain_tasks_router.router, prefix="/api")
 app.include_router(factors_router.router, prefix="/api")
+app.include_router(strategies_router.router, prefix="/api")
+app.include_router(analysis_profiles_router.router, prefix="/api")
 app.include_router(favorites.router, prefix="/api", tags=["favorites"])
 app.include_router(stocks_router.router, prefix="/api", tags=["stocks"])
 app.include_router(multi_market_stocks_router.router, prefix="/api", tags=["multi-market"])
