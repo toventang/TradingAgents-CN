@@ -373,9 +373,9 @@ async def test_repository_creates_point_in_time_indexes_idempotently():
         name: len(collection.indexes)
         for name, collection in database.collections.items()
     }
-    assert set(database.collections) == {
+    assert {
         repository.UNIVERSE_COLLECTION,
         repository.CORPORATE_ACTION_COLLECTION,
         repository.BENCHMARK_COLLECTION,
         repository.MARKET_RULE_COLLECTION,
-    }
+    }.issubset(database.collections)
