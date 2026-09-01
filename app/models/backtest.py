@@ -1,15 +1,14 @@
 """Point-in-time input contracts for deterministic daily backtests.
 
-This module intentionally contains no order, fill, ledger, or performance
-logic.  J30 freezes the historical inputs consumed by those later layers.
-Raw market prices remain unadjusted; adjustment data is carried separately.
+J30 freezes historical inputs and J31 defines transient order/fill contracts.
+Ledger persistence and performance logic remain in later tasks. Raw market
+prices remain unadjusted; adjustment data is carried separately.
 """
 
 from __future__ import annotations
 
 import hashlib
 import json
-import math
 from datetime import date, datetime, timezone
 from decimal import Decimal
 from enum import Enum
@@ -387,3 +386,330 @@ def finite_decimal(value: float | Decimal) -> Decimal:
     if not result.is_finite() or result <= 0:
         raise ValueError("price must be finite and positive")
     return result
+
+
+class OrderSide(str, Enum):
+    BUY = "buy"
+    SELL = "sell"
+
+
+class BrokerOrderStatus(str, Enum):
+    PENDING = "pending"
+    PARTIALLY_FILLED = "partially_filled"
+    FILLED = "filled"
+    REJECTED = "rejected"
+    EXPIRED = "expired"
+    CANCELLED = "cancelled"
+
+
+class ExecutionPriceModel(str, Enum):
+    NEXT_OPEN = "next_open"
+    NEXT_VWAP_PROXY = "next_vwap_proxy"
+    NEXT_CLOSE = "next_close"
+
+
+class SlippageModel(str, Enum):
+    FIXED_BPS = "fixed_bps"
+    VOLUME_IMPACT = "volume_impact"
+
+
+class SameBarConflictMode(str, Enum):
+    CONSERVATIVE = "conservative"
+    OPTIMISTIC = "optimistic"
+    OPEN_PATH = "open_path"
+
+
+class ExitReason(str, Enum):
+    FIXED_STOP_LOSS = "fixed_stop_loss"
+    FIXED_TAKE_PROFIT = "fixed_take_profit"
+    ATR_STOP = "atr_stop"
+    TRAILING_STOP = "trailing_stop"
+    TIME_EXIT = "time_exit"
+    SIGNAL_EXIT = "signal_exit"
+    PORTFOLIO_DRAWDOWN = "portfolio_drawdown"
+
+
+class SlippageConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    model: SlippageModel = SlippageModel.FIXED_BPS
+    fixed_bps: Decimal = Field(default=Decimal("0"), ge=0, le=1000)
+    base_bps: Decimal = Field(default=Decimal("0"), ge=0, le=1000)
+    impact_coefficient: Decimal = Field(default=Decimal("0"), ge=0, le=10000)
+
+    @model_validator(mode="after")
+    def validate_selected_slippage(self) -> "SlippageConfig":
+        if self.model == SlippageModel.FIXED_BPS:
+            if self.base_bps != 0 or self.impact_coefficient != 0:
+                raise ValueError("fixed_bps slippage does not accept impact parameters")
+        elif self.fixed_bps != 0:
+            raise ValueError("volume_impact slippage does not accept fixed_bps")
+        return self
+
+
+class FeeSchedule(BaseModel):
+    """Date-versioned rates; decimal fractions, not percentage points."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    commission_rate: Decimal = Field(default=Decimal("0"), ge=0, le=1)
+    commission_per_share: Decimal = Field(default=Decimal("0"), ge=0)
+    minimum_commission: Decimal = Field(default=Decimal("0"), ge=0)
+    stamp_duty_rate: Decimal = Field(default=Decimal("0"), ge=0, le=1)
+    transfer_fee_rate: Decimal = Field(default=Decimal("0"), ge=0, le=1)
+    transaction_levy_rate: Decimal = Field(default=Decimal("0"), ge=0, le=1)
+    trading_fee_rate: Decimal = Field(default=Decimal("0"), ge=0, le=1)
+    settlement_fee_rate: Decimal = Field(default=Decimal("0"), ge=0, le=1)
+    sec_fee_rate: Decimal = Field(default=Decimal("0"), ge=0, le=1)
+    minimum_sec_fee: Decimal = Field(default=Decimal("0"), ge=0)
+    other_rate: Decimal = Field(default=Decimal("0"), ge=0, le=1)
+
+
+class SecurityRuleContext(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    market: Market
+    symbol: str = Field(min_length=1, max_length=64)
+    board: str | None = Field(default=None, min_length=1, max_length=64)
+    is_st: bool = False
+    lot_size: StrictInt | None = Field(default=None, ge=1)
+    upper_limit_price: Decimal | None = Field(default=None, gt=0)
+    lower_limit_price: Decimal | None = Field(default=None, gt=0)
+
+    @model_validator(mode="after")
+    def validate_explicit_limits(self) -> "SecurityRuleContext":
+        if (self.upper_limit_price is None) != (self.lower_limit_price is None):
+            raise ValueError("upper and lower limit prices must be supplied together")
+        if (
+            self.upper_limit_price is not None
+            and self.lower_limit_price is not None
+            and self.upper_limit_price <= self.lower_limit_price
+        ):
+            raise ValueError("upper_limit_price must exceed lower_limit_price")
+        return self
+
+
+class ResolvedMarketRules(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    rule_version_id: str = Field(min_length=1, max_length=128)
+    market: Market
+    symbol: str = Field(min_length=1, max_length=64)
+    trade_date: date
+    lot_size: StrictInt = Field(ge=1)
+    integer_shares: bool = True
+    t_plus_days: StrictInt = Field(default=0, ge=0, le=1)
+    participation_rate: Decimal = Field(default=Decimal("0.10"), gt=0, le=Decimal("0.10"))
+    price_tick: Decimal = Field(default=Decimal("0.01"), gt=0)
+    price_limit_pct: Decimal | None = Field(default=None, gt=0, lt=1)
+    strict_locked_limit: bool = True
+    fee_schedule: FeeSchedule = Field(default_factory=FeeSchedule)
+
+
+class BrokerOrder(BaseModel):
+    """Transient immutable order state; persistence is introduced in J32."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    order_id: str = Field(min_length=1, max_length=128)
+    market: Market
+    symbol: str = Field(min_length=1, max_length=64)
+    side: OrderSide
+    requested_quantity: StrictInt = Field(gt=0)
+    filled_quantity: StrictInt = Field(default=0, ge=0)
+    created_trade_date: date
+    expires_on: date
+    execution_model: ExecutionPriceModel = ExecutionPriceModel.NEXT_OPEN
+    slippage: SlippageConfig = Field(default_factory=SlippageConfig)
+    status: BrokerOrderStatus = BrokerOrderStatus.PENDING
+    execution_attempts: StrictInt = Field(default=0, ge=0, le=3)
+    maximum_execution_days: StrictInt = Field(default=3, ge=1, le=3)
+
+    @model_validator(mode="after")
+    def validate_order_state(self) -> "BrokerOrder":
+        if self.expires_on < self.created_trade_date:
+            raise ValueError("expires_on cannot precede created_trade_date")
+        if self.filled_quantity > self.requested_quantity:
+            raise ValueError("filled_quantity cannot exceed requested_quantity")
+        if self.execution_attempts > self.maximum_execution_days:
+            raise ValueError("execution_attempts cannot exceed maximum_execution_days")
+        remaining = self.requested_quantity - self.filled_quantity
+        if self.status == BrokerOrderStatus.FILLED and remaining != 0:
+            raise ValueError("filled order cannot have remaining quantity")
+        if remaining == 0 and self.status != BrokerOrderStatus.FILLED:
+            raise ValueError("zero-remaining order must have filled status")
+        if (
+            self.status == BrokerOrderStatus.PENDING
+            and self.filled_quantity != 0
+        ):
+            raise ValueError("pending order cannot contain an earlier fill")
+        if self.status == BrokerOrderStatus.PARTIALLY_FILLED and not (
+            0 < self.filled_quantity < self.requested_quantity
+        ):
+            raise ValueError("partially filled order requires partial cumulative fill")
+        return self
+
+    @property
+    def remaining_quantity(self) -> int:
+        return self.requested_quantity - self.filled_quantity
+
+
+class PositionLot(BaseModel):
+    """Settlement-aware lot used only to calculate sell availability."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    lot_id: str = Field(min_length=1, max_length=128)
+    market: Market
+    symbol: str = Field(min_length=1, max_length=64)
+    quantity: StrictInt = Field(gt=0)
+    remaining_quantity: StrictInt = Field(gt=0)
+    acquired_trade_date: date
+    available_trade_date: date
+    unit_cost: Decimal = Field(gt=0)
+
+    @model_validator(mode="after")
+    def validate_lot(self) -> "PositionLot":
+        if self.remaining_quantity > self.quantity:
+            raise ValueError("remaining lot quantity cannot exceed original quantity")
+        if self.available_trade_date < self.acquired_trade_date:
+            raise ValueError("available_trade_date cannot precede acquisition")
+        return self
+
+
+class FeeBreakdown(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    commission: Decimal = Field(default=Decimal("0"), ge=0)
+    stamp_duty: Decimal = Field(default=Decimal("0"), ge=0)
+    transfer_fee: Decimal = Field(default=Decimal("0"), ge=0)
+    transaction_levy: Decimal = Field(default=Decimal("0"), ge=0)
+    trading_fee: Decimal = Field(default=Decimal("0"), ge=0)
+    settlement_fee: Decimal = Field(default=Decimal("0"), ge=0)
+    sec_fee: Decimal = Field(default=Decimal("0"), ge=0)
+    other: Decimal = Field(default=Decimal("0"), ge=0)
+    total: Decimal = Field(default=Decimal("0"), ge=0)
+
+    @model_validator(mode="after")
+    def calculate_total(self) -> "FeeBreakdown":
+        expected = sum(
+            (
+                self.commission,
+                self.stamp_duty,
+                self.transfer_fee,
+                self.transaction_levy,
+                self.trading_fee,
+                self.settlement_fee,
+                self.sec_fee,
+                self.other,
+            ),
+            Decimal("0"),
+        )
+        if self.total not in (Decimal("0"), expected):
+            raise ValueError("fee total does not match components")
+        object.__setattr__(self, "total", expected)
+        return self
+
+
+class BrokerFill(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    order_id: str
+    market: Market
+    symbol: str
+    side: OrderSide
+    trade_date: date
+    quantity: StrictInt = Field(gt=0)
+    raw_price: Decimal = Field(gt=0)
+    slippage_per_share: Decimal
+    fill_price: Decimal = Field(gt=0)
+    notional: Decimal = Field(gt=0)
+    fees: FeeBreakdown
+    warnings: tuple[str, ...] = ()
+
+    @model_validator(mode="after")
+    def reconcile_fill(self) -> "BrokerFill":
+        if self.notional != self.fill_price * self.quantity:
+            raise ValueError("fill notional must equal fill price times quantity")
+        if self.slippage_per_share != self.fill_price - self.raw_price:
+            raise ValueError("slippage_per_share does not reconcile")
+        return self
+
+
+class BrokerExecutionResult(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    order_id: str
+    trade_date: date
+    status: BrokerOrderStatus
+    requested_quantity: StrictInt = Field(gt=0)
+    cumulative_filled_quantity: StrictInt = Field(ge=0)
+    remaining_quantity: StrictInt = Field(ge=0)
+    execution_attempts: StrictInt = Field(ge=0, le=3)
+    fill: BrokerFill | None = None
+    reason: str | None = None
+    warnings: tuple[str, ...] = ()
+
+    @model_validator(mode="after")
+    def validate_execution_result(self) -> "BrokerExecutionResult":
+        if (
+            self.cumulative_filled_quantity + self.remaining_quantity
+            != self.requested_quantity
+        ):
+            raise ValueError("execution quantities do not reconcile to requested quantity")
+        if self.status == BrokerOrderStatus.FILLED and self.remaining_quantity != 0:
+            raise ValueError("filled result cannot have remaining quantity")
+        if self.fill is None and self.status == BrokerOrderStatus.FILLED:
+            raise ValueError("fill status requires a fill record")
+        if self.status == BrokerOrderStatus.PARTIALLY_FILLED and not (
+            self.cumulative_filled_quantity > 0 and self.remaining_quantity > 0
+        ):
+            raise ValueError("partially-filled result requires filled and remaining quantity")
+        return self
+
+
+class ExitRuleConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    fixed_stop_loss_pct: Decimal | None = Field(default=None, gt=0, lt=1)
+    fixed_take_profit_pct: Decimal | None = Field(default=None, gt=0)
+    atr_stop_multiple: Decimal | None = Field(default=None, gt=0)
+    trailing_stop_pct: Decimal | None = Field(default=None, gt=0, lt=1)
+    trailing_atr_multiple: Decimal | None = Field(default=None, gt=0)
+    maximum_holding_days: StrictInt | None = Field(default=None, ge=1)
+    conflict_mode: SameBarConflictMode = SameBarConflictMode.CONSERVATIVE
+
+
+class ExitDecision(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    triggered: bool
+    reason: ExitReason | None = None
+    trigger_price: Decimal | None = Field(default=None, gt=0)
+    same_bar_conflict: bool = False
+    assumption_warning: str | None = None
+    research_only_assumption: bool = False
+
+    @model_validator(mode="after")
+    def validate_exit_decision(self) -> "ExitDecision":
+        if self.triggered != (self.reason is not None):
+            raise ValueError("triggered exit must include exactly one reason")
+        if not self.triggered and self.trigger_price is not None:
+            raise ValueError("non-triggered exit cannot include a trigger price")
+        return self
+
+
+class SignalConflictDecision(BaseModel):
+    """Exit-before-entry and cooldown decision for one symbol and signal day."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    exit_selected: bool
+    buy_allowed: bool
+    reason: str
+
+    @model_validator(mode="after")
+    def prevent_exit_and_buy(self) -> "SignalConflictDecision":
+        if self.exit_selected and self.buy_allowed:
+            raise ValueError("exit and buy cannot both be selected for one symbol/day")
+        return self
