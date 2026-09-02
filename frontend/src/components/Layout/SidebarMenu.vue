@@ -37,6 +37,11 @@
       <template #title>策略中心</template>
     </el-menu-item>
 
+    <el-menu-item index="/backtests/runs">
+      <el-icon><DataLine /></el-icon>
+      <template #title>历史回测</template>
+    </el-menu-item>
+
     <el-sub-menu index="/factors">
       <template #title>
         <el-icon><DataAnalysis /></el-icon>
@@ -126,6 +131,7 @@ import {
   Star,
   List,
   DataAnalysis,
+  DataLine,
   SetUp,
   /* Document 移除：不再使用顶级分析报告菜单图标 */
   Setting,
@@ -136,7 +142,7 @@ import {
 const route = useRoute()
 const appStore = useAppStore()
 
-const activeMenu = computed(() => route.path)
+const activeMenu = computed(() => route.path.startsWith('/backtests') ? '/backtests/runs' : route.path)
 </script>
 
 <style lang="scss" scoped>

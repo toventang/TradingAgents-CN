@@ -130,6 +130,39 @@ const routes: RouteRecordRaw[] = [
   },
 
   {
+    path: '/backtests',
+    name: 'Backtests',
+    component: () => import('@/layouts/BasicLayout.vue'),
+    redirect: '/backtests/runs',
+    meta: {
+      title: '历史回测',
+      icon: 'DataLine',
+      requiresAuth: true,
+      transition: 'slide-up'
+    },
+    children: [
+      {
+        path: 'runs',
+        name: 'BacktestCenter',
+        component: () => import('@/views/Backtests/BacktestCenter.vue'),
+        meta: { title: '历史回测', requiresAuth: true }
+      },
+      {
+        path: 'new',
+        name: 'BacktestCreate',
+        component: () => import('@/views/Backtests/BacktestCreate.vue'),
+        meta: { title: '创建回测', requiresAuth: true, hideInMenu: true }
+      },
+      {
+        path: ':runId',
+        name: 'BacktestDetail',
+        component: () => import('@/views/Backtests/BacktestDetail.vue'),
+        meta: { title: '回测详情', requiresAuth: true, hideInMenu: true }
+      }
+    ]
+  },
+
+  {
     path: '/favorites',
     name: 'Favorites',
     component: () => import('@/layouts/BasicLayout.vue'),
