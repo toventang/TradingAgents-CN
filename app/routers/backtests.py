@@ -41,6 +41,20 @@ from app.services.backtest.ledger import (
     BacktestRunStatus,
     BacktestTradeRecord,
 )
+from app.services.backtest.parameter_search import (
+    ParameterResultPage,
+    ParameterSearchAccepted,
+    ParameterSearchCancelResult,
+    ParameterSearchConflict,
+    ParameterSearchDetail,
+    ParameterSearchNotFound,
+    ParameterSearchPage,
+    ParameterSearchRepository,
+    ParameterSearchRequest,
+    ParameterSearchService,
+    ParameterSearchStatus,
+    ParameterSearchValidationError,
+)
 
 
 router = APIRouter(prefix="/backtests", tags=["backtests"])
@@ -55,16 +69,27 @@ def get_backtest_api_service() -> BacktestApiService:
     )
 
 
+def get_parameter_search_service() -> ParameterSearchService:
+    database = get_mongo_db()
+    backtests = BacktestRepository(database)
+    return ParameterSearchService(
+        repository=ParameterSearchRepository(database),
+        backtests=backtests,
+        tasks=DomainTaskRepository(database),
+        strategies=StrategyRepository(database),
+    )
+
+
 def _error(code: str, message: str) -> dict[str, str]:
     return {"code": code, "message": message}
 
 
 def _raise_api_error(exc: Exception) -> NoReturn:
-    if isinstance(exc, BacktestApiNotFound):
+    if isinstance(exc, (BacktestApiNotFound, ParameterSearchNotFound)):
         code = status.HTTP_404_NOT_FOUND
-    elif isinstance(exc, BacktestApiValidationError):
+    elif isinstance(exc, (BacktestApiValidationError, ParameterSearchValidationError)):
         code = status.HTTP_422_UNPROCESSABLE_CONTENT
-    elif isinstance(exc, BacktestApiConflict):
+    elif isinstance(exc, (BacktestApiConflict, ParameterSearchConflict)):
         code = status.HTTP_409_CONFLICT
     elif isinstance(exc, BacktestApiLimitExceeded):
         code = status.HTTP_413_CONTENT_TOO_LARGE
@@ -132,6 +157,105 @@ async def compare_backtests(
     try:
         return await service.compare(user_id=current_user["id"], request=payload)
     except (BacktestApiNotFound, BacktestApiConflict, BacktestApiLimitExceeded) as exc:
+        _raise_api_error(exc)
+    except PyMongoError as exc:
+        _raise_store_unavailable(exc)
+
+
+@router.post(
+    "/parameter-search",
+    response_model=ParameterSearchAccepted,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def create_parameter_search(
+    payload: ParameterSearchRequest,
+    idempotency_key: str | None = Header(
+        default=None, alias="Idempotency-Key", min_length=1, max_length=200
+    ),
+    current_user: dict = Depends(get_current_user),
+    service: ParameterSearchService = Depends(get_parameter_search_service),
+) -> ParameterSearchAccepted:
+    try:
+        return await service.create(
+            user_id=current_user["id"],
+            request=payload,
+            client_idempotency_key=idempotency_key,
+        )
+    except (ParameterSearchValidationError, ParameterSearchConflict) as exc:
+        _raise_api_error(exc)
+    except PyMongoError as exc:
+        _raise_store_unavailable(exc)
+
+
+@router.get("/parameter-search", response_model=ParameterSearchPage)
+async def list_parameter_searches(
+    search_status: ParameterSearchStatus | None = Query(default=None, alias="status"),
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=50, ge=1, le=200),
+    current_user: dict = Depends(get_current_user),
+    service: ParameterSearchService = Depends(get_parameter_search_service),
+) -> ParameterSearchPage:
+    try:
+        return await service.list(
+            user_id=current_user["id"],
+            status=search_status,
+            page=page,
+            page_size=page_size,
+        )
+    except PyMongoError as exc:
+        _raise_store_unavailable(exc)
+
+
+@router.get("/parameter-search/{search_id}", response_model=ParameterSearchDetail)
+async def get_parameter_search(
+    search_id: str,
+    current_user: dict = Depends(get_current_user),
+    service: ParameterSearchService = Depends(get_parameter_search_service),
+) -> ParameterSearchDetail:
+    try:
+        return await service.detail(user_id=current_user["id"], search_id=search_id)
+    except ParameterSearchNotFound as exc:
+        _raise_api_error(exc)
+    except PyMongoError as exc:
+        _raise_store_unavailable(exc)
+
+
+@router.get(
+    "/parameter-search/{search_id}/results", response_model=ParameterResultPage
+)
+async def get_parameter_search_results(
+    search_id: str,
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=100, ge=1, le=200),
+    current_user: dict = Depends(get_current_user),
+    service: ParameterSearchService = Depends(get_parameter_search_service),
+) -> ParameterResultPage:
+    try:
+        return await service.results(
+            user_id=current_user["id"],
+            search_id=search_id,
+            page=page,
+            page_size=page_size,
+        )
+    except ParameterSearchNotFound as exc:
+        _raise_api_error(exc)
+    except PyMongoError as exc:
+        _raise_store_unavailable(exc)
+
+
+@router.post(
+    "/parameter-search/{search_id}/cancel",
+    response_model=ParameterSearchCancelResult,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def cancel_parameter_search(
+    search_id: str,
+    current_user: dict = Depends(get_current_user),
+    service: ParameterSearchService = Depends(get_parameter_search_service),
+) -> ParameterSearchCancelResult:
+    try:
+        return await service.cancel(user_id=current_user["id"], search_id=search_id)
+    except (ParameterSearchNotFound, ParameterSearchConflict) as exc:
         _raise_api_error(exc)
     except PyMongoError as exc:
         _raise_store_unavailable(exc)

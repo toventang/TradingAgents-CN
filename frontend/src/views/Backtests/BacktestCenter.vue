@@ -5,8 +5,15 @@
         <h1>历史回测</h1>
         <p>管理确定性回测任务，检查数据质量、交易明细与可复现指标。</p>
       </div>
-      <el-button type="primary" :icon="Plus" @click="router.push('/backtests/new')">创建回测</el-button>
+      <div class="header-actions">
+        <el-button :icon="DataAnalysis" @click="parameterLabOpen = !parameterLabOpen">
+          {{ parameterLabOpen ? '收起参数实验室' : '参数实验室' }}
+        </el-button>
+        <el-button type="primary" :icon="Plus" @click="router.push('/backtests/new')">创建回测</el-button>
+      </div>
     </header>
+
+    <ParameterLab v-if="parameterLabOpen" @close="parameterLabOpen = false" />
 
     <div class="toolbar">
       <div class="filters">
@@ -128,9 +135,10 @@
 import { onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { Plus, Refresh } from '@element-plus/icons-vue'
+import { DataAnalysis, Plus, Refresh } from '@element-plus/icons-vue'
 import { backtestApi } from '@/api/backtests'
 import { strategyApi } from '@/api/strategies'
+import ParameterLab from './ParameterLab.vue'
 import type {
   BacktestCompareResult,
   BacktestPage,
@@ -145,6 +153,7 @@ const router = useRouter()
 const loading = ref(false)
 const comparing = ref(false)
 const compareOpen = ref(false)
+const parameterLabOpen = ref(false)
 const comparison = ref<BacktestCompareResult | null>(null)
 const page = ref(1)
 const pageSize = ref(20)
@@ -253,6 +262,7 @@ function numberValue(value: BacktestPerformanceReport[MetricKey]): string {
 .page-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; margin-bottom: 20px; }
 .page-header h1 { margin: 0 0 8px; font-size: 28px; line-height: 1.25; }
 .page-header p { margin: 0; color: var(--el-text-color-secondary); max-width: 70ch; }
+.header-actions { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
 .toolbar { display: flex; align-items: center; justify-content: space-between; gap: 18px; margin-bottom: 14px; }
 .filters, .compare-actions { display: flex; align-items: center; gap: 10px; }
 .filters .el-select { width: 150px; }
@@ -276,6 +286,7 @@ function numberValue(value: BacktestPerformanceReport[MetricKey]): string {
 @media (max-width: 720px) {
   .backtest-page { padding: 16px; }
   .page-header, .toolbar { align-items: stretch; flex-direction: column; }
+  .header-actions { flex-wrap: wrap; }
   .filters { flex-wrap: wrap; }
   .compare-actions { justify-content: space-between; }
   .pagination { justify-content: flex-start; overflow-x: auto; }
