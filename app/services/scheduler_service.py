@@ -26,6 +26,123 @@ logger = get_logger(__name__)
 # UTC+8 时区
 UTC_8 = timezone(timedelta(hours=8))
 
+ALERT_EVALUATION_BATCH_JOB_ID = "alert_evaluation_batches"
+
+
+class AlertEvaluationBatchEnqueuer:
+    """Create durable market/frequency batches; never create per-rule jobs."""
+
+    def __init__(self, database, task_repository, *, holiday_provider=None):
+        self.database = database
+        self.task_repository = task_repository
+        self.holiday_provider = holiday_provider
+
+    async def enqueue_due_batches(
+        self,
+        *,
+        evaluated_at: Optional[datetime] = None,
+    ) -> list:
+        from app.models.alert import AlertRule, SYSTEM_USER_ID
+        from app.models.domain_task import (
+            DomainTask,
+            DomainTaskPriority,
+            DomainTaskType,
+        )
+        from app.services.alerts.planner import BatchPlanner, alert_time_bucket
+
+        timestamp = evaluated_at or datetime.now(timezone.utc)
+        if timestamp.tzinfo is None or timestamp.utcoffset() is None:
+            raise ValueError("alert batch timestamp must be timezone-aware")
+        timestamp = timestamp.astimezone(timezone.utc).replace(microsecond=0)
+        cursor = self.database["alert_rules"].find(
+            {"enabled": True},
+        )
+        documents = await cursor.to_list(length=None)
+        rules = []
+        for document in documents:
+            payload = dict(document)
+            payload.pop("_id", None)
+            rules.append(AlertRule.model_validate(payload))
+        combinations = sorted(
+            {
+                (str(item["market"]), int(item["frequency_seconds"]))
+                for item in documents
+                if item.get("market") and item.get("frequency_seconds")
+            }
+        )
+        tasks = []
+        for market, frequency_seconds in combinations:
+            bucket = alert_time_bucket(timestamp, frequency_seconds)
+            holidays = (
+                tuple(await self.holiday_provider(market, timestamp))
+                if self.holiday_provider is not None
+                else ()
+            )
+            plan = BatchPlanner().plan(
+                rules,
+                market=market,
+                frequency_seconds=frequency_seconds,
+                evaluated_at=timestamp,
+                holidays=holidays,
+            )
+            if not plan.groups:
+                continue
+            idempotency_key = f"alert-eval:{market}:{frequency_seconds}:{bucket}"
+            existing_document = await self.task_repository.tasks.find_one(
+                {
+                    "user_id": SYSTEM_USER_ID,
+                    "task_type": DomainTaskType.ALERT_EVAL.value,
+                    "idempotency_key": idempotency_key,
+                }
+            )
+            if existing_document is not None:
+                clean = dict(existing_document)
+                clean.pop("_id", None)
+                tasks.append(DomainTask.model_validate(clean))
+                continue
+            task = await self.task_repository.create_task(
+                user_id=SYSTEM_USER_ID,
+                task_type=DomainTaskType.ALERT_EVAL,
+                payload={
+                    "market": market,
+                    "frequency_seconds": frequency_seconds,
+                    "evaluated_at": timestamp.isoformat(),
+                    "holidays": list(holidays),
+                },
+                priority=DomainTaskPriority.SYSTEM_URGENT,
+                idempotency_key=idempotency_key,
+                stage="queued",
+                message="scheduled alert evaluation batch",
+            )
+            tasks.append(task)
+        return tasks
+
+
+def register_alert_evaluation_batch_job(
+    scheduler: AsyncIOScheduler,
+    enqueuer: AlertEvaluationBatchEnqueuer,
+    *,
+    interval_seconds: int = 30,
+) -> Job:
+    """Register the sole recurring alert job that only enqueues batches."""
+
+    if interval_seconds < 30:
+        raise ValueError("alert scheduler interval must be at least 30 seconds")
+    scheduler.add_job(
+        enqueuer.enqueue_due_batches,
+        "interval",
+        seconds=interval_seconds,
+        id=ALERT_EVALUATION_BATCH_JOB_ID,
+        name="预警评估批次入队",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+    )
+    job = scheduler.get_job(ALERT_EVALUATION_BATCH_JOB_ID)
+    if job is None:
+        raise RuntimeError("alert evaluation scheduler job was not registered")
+    return job
+
 
 def get_utc8_now():
     """
@@ -1157,4 +1274,3 @@ async def update_job_progress(
 
     except Exception as e:
         logger.error(f"❌ 更新任务进度失败: {e}")
-
