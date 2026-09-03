@@ -4,12 +4,16 @@ import asyncio
 import json
 import logging
 from datetime import datetime, timezone
-from typing import Dict, Optional, Set, Tuple
+from typing import Any, Dict, Optional, Set, Tuple
 
 from bson import ObjectId
 from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect
 
 from app.services.auth_service import AuthService, AuthenticatedIdentity
+from app.services.notifications_service import (
+    NOTIFICATION_FANOUT_CHANNEL,
+    NOTIFICATION_INSTANCE_ID,
+)
 
 router = APIRouter()
 logger = logging.getLogger("webapi.websocket")
@@ -131,6 +135,132 @@ class ConnectionManager:
 manager = ConnectionManager()
 
 
+class RedisNotificationRelay:
+    """Relay owner-addressed Redis notifications to sockets on this instance."""
+
+    def __init__(
+        self,
+        connection_manager: ConnectionManager,
+        *,
+        redis_factory=None,
+        instance_id: str = NOTIFICATION_INSTANCE_ID,
+        channel: str = NOTIFICATION_FANOUT_CHANNEL,
+    ):
+        self.manager = connection_manager
+        self.redis_factory = redis_factory
+        self.instance_id = instance_id
+        self.channel = channel
+        self._pubsub = None
+        self._task: asyncio.Task | None = None
+        self._start_lock = asyncio.Lock()
+
+    async def start(self) -> bool:
+        if self._task is not None and not self._task.done():
+            return True
+        async with self._start_lock:
+            if self._task is not None and not self._task.done():
+                return True
+            try:
+                if self.redis_factory is None:
+                    from app.core.database import get_redis_client
+
+                    redis = get_redis_client()
+                else:
+                    redis = self.redis_factory()
+                self._pubsub = redis.pubsub()
+                await self._pubsub.subscribe(self.channel)
+                self._task = asyncio.create_task(self._listen())
+                return True
+            except Exception:
+                logger.warning(
+                    "[WS] Redis notification relay unavailable; Mongo fallback remains",
+                    exc_info=True,
+                )
+                await self.close()
+                return False
+
+    async def close(self) -> None:
+        task = self._task
+        self._task = None
+        if task is not None and task is not asyncio.current_task():
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+        pubsub = self._pubsub
+        self._pubsub = None
+        if pubsub is not None:
+            try:
+                await pubsub.unsubscribe(self.channel)
+            except Exception:
+                logger.debug("[WS] Redis relay unsubscribe failed", exc_info=True)
+            try:
+                close = getattr(pubsub, "aclose", None) or getattr(pubsub, "close")
+                result = close()
+                if asyncio.iscoroutine(result):
+                    await result
+            except Exception:
+                logger.debug("[WS] Redis relay close failed", exc_info=True)
+
+    async def _listen(self) -> None:
+        try:
+            while self._pubsub is not None:
+                message = await self._pubsub.get_message(
+                    ignore_subscribe_messages=True,
+                    timeout=1.0,
+                )
+                if message is None:
+                    await asyncio.sleep(0)
+                    continue
+                await self.handle_message(message.get("data"))
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.warning("[WS] Redis notification relay stopped", exc_info=True)
+        finally:
+            if self._pubsub is not None:
+                await self.close()
+
+    async def handle_message(self, raw: Any) -> bool:
+        try:
+            if isinstance(raw, bytes):
+                raw = raw.decode("utf-8")
+            envelope = json.loads(raw) if isinstance(raw, str) else raw
+            if not isinstance(envelope, dict) or envelope.get("schema_version") != 1:
+                return False
+            if envelope.get("origin_instance_id") == self.instance_id:
+                return False
+            user_id = envelope.get("user_id")
+            message = envelope.get("message")
+            if not isinstance(user_id, str) or not user_id or not isinstance(message, dict):
+                return False
+            public_message = _redact_sensitive_fields(message)
+            await self.manager.send_personal_message(
+                {"type": "notification", "data": public_message},
+                user_id,
+            )
+            return True
+        except (UnicodeDecodeError, json.JSONDecodeError, TypeError):
+            logger.warning("[WS] discarded invalid Redis notification envelope")
+            return False
+
+
+notification_relay = RedisNotificationRelay(manager)
+
+
+def _redact_sensitive_fields(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {
+            key: _redact_sensitive_fields(item)
+            for key, item in value.items()
+            if key.lower() not in {"user_id", "token", "authorization"}
+        }
+    if isinstance(value, list):
+        return [_redact_sensitive_fields(item) for item in value]
+    return value
+
+
 def _user_id_candidates(user_id: str) -> list[object]:
     candidates: list[object] = [user_id]
     if ObjectId.is_valid(user_id):
@@ -249,6 +379,7 @@ async def websocket_notifications_endpoint(
     if identity is None:
         return
 
+    await notification_relay.start()
     await manager.connect(websocket, identity.user_id)
     await websocket.send_json(
         {
