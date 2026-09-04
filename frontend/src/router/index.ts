@@ -163,6 +163,25 @@ const routes: RouteRecordRaw[] = [
   },
 
   {
+    path: '/alerts',
+    name: 'Alerts',
+    component: () => import('@/layouts/BasicLayout.vue'),
+    meta: {
+      title: '预警中心',
+      icon: 'Bell',
+      requiresAuth: true,
+      transition: 'slide-up'
+    },
+    children: [
+      {
+        path: '',
+        name: 'AlertCenter',
+        component: () => import('@/views/Alerts/AlertCenter.vue'),
+        meta: { title: '预警中心', requiresAuth: true }
+      }
+    ]
+  },
+  {
     path: '/favorites',
     name: 'Favorites',
     component: () => import('@/layouts/BasicLayout.vue'),

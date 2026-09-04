@@ -174,7 +174,7 @@
           </template>
         </el-table-column>
 
-        <el-table-column label="操作" width="260" fixed="right">
+        <el-table-column label="操作" width="310" fixed="right">
           <template #default="{ row }">
             <el-button
               type="text"
@@ -199,6 +199,13 @@
               @click="analyzeFavorite(row)"
             >
               分析
+            </el-button>
+            <el-button
+              type="text"
+              size="small"
+              @click="openAdvancedAlert(row)"
+            >
+              预警
             </el-button>
             <el-button
               type="text"
@@ -280,6 +287,25 @@
             placeholder="可选：添加备注信息"
           />
         </el-form-item>
+
+        <div class="legacy-alert-fields">
+          <div class="legacy-alert-heading">
+            <strong>快捷价格预警</strong>
+            <span>保留兼容设置；复杂条件请使用高级规则</span>
+          </div>
+          <el-row :gutter="12">
+            <el-col :span="12">
+              <el-form-item label="价格高于">
+                <el-input-number v-model="addForm.alert_price_high" :min="0" :precision="3" controls-position="right" />
+              </el-form-item>
+            </el-col>
+            <el-col :span="12">
+              <el-form-item label="价格低于">
+                <el-input-number v-model="addForm.alert_price_low" :min="0" :precision="3" controls-position="right" />
+              </el-form-item>
+            </el-col>
+          </el-row>
+        </div>
       </el-form>
 
       <template #footer>
@@ -314,6 +340,28 @@
         <el-form-item label="备注">
           <el-input v-model="editForm.notes" type="textarea" :rows="2" placeholder="可选：添加备注信息" />
         </el-form-item>
+
+        <div class="legacy-alert-fields">
+          <div class="legacy-alert-heading">
+            <strong>快捷价格预警</strong>
+            <span>高低价字段会继续兼容现有自选股预警</span>
+          </div>
+          <el-row :gutter="12">
+            <el-col :span="12">
+              <el-form-item label="价格高于">
+                <el-input-number v-model="editForm.alert_price_high" :min="0" :precision="3" controls-position="right" />
+              </el-form-item>
+            </el-col>
+            <el-col :span="12">
+              <el-form-item label="价格低于">
+                <el-input-number v-model="editForm.alert_price_low" :min="0" :precision="3" controls-position="right" />
+              </el-form-item>
+            </el-col>
+          </el-row>
+          <el-button class="advanced-alert-link" text type="primary" @click="openAdvancedAlert(editForm)">
+            <el-icon><Bell /></el-icon>配置持续时间、冷却、因子或多渠道高级规则
+          </el-button>
+        </div>
       </el-form>
 
       <template #footer>
@@ -507,7 +555,8 @@ import {
   Search,
   Refresh,
   Plus,
-  Download
+  Download,
+  Bell
 } from '@element-plus/icons-vue'
 import { favoritesApi } from '@/api/favorites'
 import { tagsApi } from '@/api/tags'
@@ -576,7 +625,9 @@ const addForm = ref({
   stock_name: '',
   market: 'A股',
   tags: [],
-  notes: ''
+  notes: '',
+  alert_price_high: null as number | null,
+  alert_price_low: null as number | null
 })
 
 // 股票代码验证器
@@ -634,7 +685,9 @@ const editForm = ref({
   stock_name: '',
   market: 'A股',
   tags: [] as string[],
-  notes: ''
+  notes: '',
+  alert_price_high: null as number | null,
+  alert_price_low: null as number | null
 })
 
 
@@ -862,7 +915,9 @@ const showAddDialog = () => {
     stock_name: '',
     market: 'A股',
     tags: [],
-    notes: ''
+    notes: '',
+    alert_price_high: null,
+    alert_price_low: null
   }
   addDialogVisible.value = true
 }
@@ -956,7 +1011,9 @@ const handleUpdateFavorite = async () => {
     editLoading.value = true
     const payload = {
       tags: editForm.value.tags,
-      notes: editForm.value.notes
+      notes: editForm.value.notes,
+      alert_price_high: editForm.value.alert_price_high,
+      alert_price_low: editForm.value.alert_price_low
     }
     const res = await favoritesApi.update(editForm.value.stock_code, payload as any)
     if ((res as any)?.success === false) throw new Error((res as any)?.message || '更新失败')
@@ -978,7 +1035,9 @@ const editFavorite = (row: any) => {
     stock_name: row.stock_name,
     market: row.market || 'A股',
     tags: Array.isArray(row.tags) ? [...row.tags] : [],
-    notes: row.notes || ''
+    notes: row.notes || '',
+    alert_price_high: row.alert_price_high ?? null,
+    alert_price_low: row.alert_price_low ?? null
   }
   editDialogVisible.value = true
 }
@@ -987,6 +1046,16 @@ const analyzeFavorite = (row: any) => {
   router.push({
     name: 'SingleAnalysis',
     query: { stock: row.stock_code, market: normalizeMarketForAnalysis(row.market || 'A股') }
+  })
+}
+
+const openAdvancedAlert = (row: any) => {
+  const symbol = row.symbol || row.stock_code || ''
+  const market = normalizeMarketForAnalysis(row.market || 'A股')
+  editDialogVisible.value = false
+  router.push({
+    path: '/alerts',
+    query: { tab: 'rules', create: '1', symbol, market }
   })
 }
 
@@ -1267,5 +1336,23 @@ onMounted(() => {
       color: #67c23a;
     }
   }
+
+  .legacy-alert-fields {
+    margin-top: 18px;
+    padding: 16px 16px 6px;
+    border-radius: 12px;
+    background: var(--el-fill-color-light);
+  }
+
+  .legacy-alert-heading {
+    margin-bottom: 12px;
+
+    strong,
+    span { display: block; }
+    strong { color: var(--el-text-color-primary); font-size: 14px; }
+    span { margin-top: 4px; color: var(--el-text-color-secondary); font-size: 12px; }
+  }
+
+  .advanced-alert-link { margin: -2px 0 8px 86px; }
 }
 </style>
